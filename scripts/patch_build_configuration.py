@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """Patch Telegram-iOS build system for fake-codesigning builds.
 
-1. Replace copy_profiles_from_directory with a simple direct-copy version.
+1. Replace copy_profiles_from_directory with a simple direct-copy version
+   (avoids fragile openssl smime parsing).
 2. Create any missing provisioning profiles that Telegram/BUILD references
-   but don't exist in fake-codesigning/profiles/ (e.g. BroadcastUpload).
-3. Inject --//Telegram:disableProvisioningProfiles=True into the Bazel command
-   so provisioning profiles aren't required at all.
+   but don't exist in fake-codesigning/profiles/ (e.g. BroadcastUpload at release-11.13).
 """
 
 import sys
@@ -70,9 +69,9 @@ def create_missing_profiles(build_dir):
 
     # Find existing profiles
     existing = set()
-    for f in os.listdir(profiles_dir):
-        if f.endswith('.mobileprovision'):
-            existing.add(f.replace('.mobileprovision', ''))
+    for fname in os.listdir(profiles_dir):
+        if fname.endswith('.mobileprovision'):
+            existing.add(fname.replace('.mobileprovision', ''))
 
     missing = referenced - existing
     if not missing:
@@ -89,37 +88,7 @@ def create_missing_profiles(build_dir):
         shutil.copyfile(template, dest)
         print(f"[2] Created missing profile: {name}.mobileprovision (from template)")
 
-
-def inject_disable_provisioning(build_dir):
-    """Add set_disable_provisioning_profiles() before invoke_build() in the build function.
-
-    BazelCommandLine already has this method - we just need to call it.
-    This makes provisioning profiles optional for debug/fake-codesigning builds.
-    """
-    make_path = os.path.join(build_dir, "build-system", "Make", "Make.py")
-
-    with open(make_path, "r") as f:
-        content = f.read()
-
-    # In the build() function, add set_disable_provisioning_profiles() before invoke_build()
-    marker = "    bazel_command_line.invoke_build()\n"
-    replacement = (
-        "    bazel_command_line.set_disable_provisioning_profiles()\n"
-        "    bazel_command_line.invoke_build()\n"
-    )
-
-    if marker not in content:
-        print(f"WARNING: Could not find invoke_build() marker in Make.py")
-        return False
-
-    # Only replace the first occurrence (in the build() function)
-    content = content.replace(marker, replacement, 1)
-
-    with open(make_path, "w") as f:
-        f.write(content)
-
-    print(f"[3] Added set_disable_provisioning_profiles() before invoke_build() in Make.py")
-    return True
+    print(f"[2] Profiles dir now contains: {sorted(os.listdir(profiles_dir))}")
 
 
 def main():
@@ -135,7 +104,6 @@ def main():
 
     patch_copy_profiles(build_dir)
     create_missing_profiles(build_dir)
-    inject_disable_provisioning(build_dir)
 
     print("\nAll patches applied successfully.")
 
