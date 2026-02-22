@@ -48,6 +48,24 @@ jobs:
         with:
           xcode-version: '16.2'
 
+      - name: Ensure iOS platform is installed
+        run: |
+          echo "=== Checking iOS platform ==="
+          xcodebuild -showsdks | grep -i ios || true
+          echo ""
+
+          # On macOS 15+, iOS platform may need separate installation
+          if ! xcodebuild -showsdks 2>/dev/null | grep -q "iphoneos"; then
+            echo "iOS platform not found, installing..."
+            xcodebuild -downloadPlatform iOS
+          else
+            echo "iOS platform already available"
+          fi
+
+          echo ""
+          echo "Available SDKs:"
+          xcodebuild -showsdks
+
       - name: Write build configuration
         run: |
           API_ID="${TELEGRAM_API_ID:-12345}"
