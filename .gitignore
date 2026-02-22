@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+venv/
+.env
+
+# Server runtime
+proxy-server/server.log
+proxy-server/*.log
+
+# macOS
+.DS_Store
+*.swp
+
+# Xcode / Bazel
+bazel-*
+*.xcworkspace
+*.xcodeproj
+DerivedData/
+build/
+
+# IDE
+.idea/
+.vscode/
+*.code-workspace
+
+# Telegram-iOS clone (created by setup script)
+telegram-ios-build/
