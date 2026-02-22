@@ -3,6 +3,7 @@
 
 1. Replace copy_profiles_from_directory with a simple glob-based copy.
 2. Fix Swift compiler opts quoting issue in Make.py for Bazel 8.x.
+3. Add DEVELOPER_DIR action_env to .bazelrc so ibtool can find the iOS platform.
 """
 
 import sys
@@ -83,6 +84,44 @@ def patch_swift_copts(build_dir):
     return True
 
 
+def patch_bazelrc_developer_dir(build_dir):
+    """Add DEVELOPER_DIR action_env to .bazelrc.
+
+    On macOS 15+, ibtool (invoked by Bazel's xctoolrunner) may fail to find
+    the iOS platform because xctoolrunner runs tools with `env -` (clearing
+    all environment variables). The --action_env flag makes Bazel pass
+    DEVELOPER_DIR through to build actions so ibtool can locate the platform.
+    """
+    import subprocess
+
+    # Get the current DEVELOPER_DIR from xcode-select
+    try:
+        developer_dir = subprocess.check_output(
+            ["xcode-select", "-p"], text=True
+        ).strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        developer_dir = "/Applications/Xcode_16.2.app/Contents/Developer"
+
+    bazelrc_path = os.path.join(build_dir, ".bazelrc")
+
+    with open(bazelrc_path, "r") as f:
+        content = f.read()
+
+    action_env_line = f"build --action_env=DEVELOPER_DIR={developer_dir}"
+
+    if "action_env=DEVELOPER_DIR" in content:
+        print(f"[3] DEVELOPER_DIR already set in {bazelrc_path}")
+        return True
+
+    content = content + "\n" + action_env_line + "\n"
+
+    with open(bazelrc_path, "w") as f:
+        f.write(content)
+
+    print(f"[3] Added {action_env_line} to {bazelrc_path}")
+    return True
+
+
 def main():
     if len(sys.argv) < 2:
         print("Usage: patch_build_configuration.py <telegram-ios-build-dir>")
@@ -96,6 +135,7 @@ def main():
 
     patch_copy_profiles(build_dir)
     patch_swift_copts(build_dir)
+    patch_bazelrc_developer_dir(build_dir)
 
 
 if __name__ == "__main__":

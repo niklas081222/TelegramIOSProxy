@@ -16,6 +16,7 @@ jobs:
     env:
       TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
       TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+      DEVELOPER_DIR: /Applications/Xcode_16.2.app/Contents/Developer
 
     steps:
       - name: Checkout repository
@@ -48,23 +49,57 @@ jobs:
         with:
           xcode-version: '16.2'
 
-      - name: Ensure iOS platform is installed
+      - name: Configure Xcode and iOS platform
         run: |
-          echo "=== Checking iOS platform ==="
-          xcodebuild -showsdks | grep -i ios || true
+          XCODE_DEV="/Applications/Xcode_16.2.app/Contents/Developer"
+
+          # Ensure Xcode is fully configured
+          sudo xcode-select --switch "$XCODE_DEV"
+          sudo xcodebuild -runFirstLaunch 2>/dev/null || true
+          sudo xcodebuild -license accept 2>/dev/null || true
+
+          echo "Xcode path: $(xcode-select -p)"
+          echo "Xcode version: $(xcodebuild -version | head -1)"
+
+          # Diagnose platform locations
+          echo ""
+          echo "=== Platform locations ==="
+          echo "Xcode bundle platforms:"
+          ls -la "$XCODE_DEV/Platforms/" 2>/dev/null || echo "  (none)"
+          echo ""
+          echo "System-level platforms:"
+          ls -la /Library/Developer/Platforms/ 2>/dev/null || echo "  (none)"
           echo ""
 
-          # On macOS 15+, iOS platform may need separate installation
-          if ! xcodebuild -showsdks 2>/dev/null | grep -q "iphoneos"; then
-            echo "iOS platform not found, installing..."
-            xcodebuild -downloadPlatform iOS
-          else
-            echo "iOS platform already available"
+          # On macOS 15+, iOS platform may be downloaded separately and stored
+          # outside the Xcode bundle. ibtool (via Bazel's xctoolrunner) looks
+          # inside the Xcode bundle, so we need to ensure it's there.
+          XCODE_PLAT="$XCODE_DEV/Platforms/iPhoneOS.platform"
+          SYS_PLAT="/Library/Developer/Platforms/iPhoneOS.platform"
+
+          if [ ! -d "$XCODE_PLAT" ] && [ -d "$SYS_PLAT" ]; then
+            echo "iOS platform found at system level but not in Xcode bundle, symlinking..."
+            sudo ln -s "$SYS_PLAT" "$XCODE_PLAT"
           fi
 
+          # Always try to download/register the iOS platform on macOS 15+
+          # This ensures the platform is fully registered even if showsdks reports it
           echo ""
-          echo "Available SDKs:"
-          xcodebuild -showsdks
+          echo "=== Ensuring iOS platform is registered ==="
+          xcodebuild -downloadPlatform iOS 2>&1 || true
+
+          echo ""
+          echo "=== Available iOS SDKs ==="
+          xcodebuild -showsdks | grep -i "ios\|iphoneos"
+
+          # Verify ibtool can be found
+          echo ""
+          echo "ibtool path: $(xcrun --find ibtool 2>/dev/null || echo 'NOT FOUND')"
+
+          # Final platform check
+          echo ""
+          echo "=== Final platform layout ==="
+          ls -la "$XCODE_DEV/Platforms/" 2>/dev/null | grep -i iphone || echo "WARNING: iPhoneOS.platform not in Xcode bundle!"
 
       - name: Write build configuration
         run: |

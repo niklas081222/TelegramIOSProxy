@@ -9,6 +9,7 @@ venv/
 # Server runtime
 proxy-server/server.log
 proxy-server/*.log
+proxy-server/config.json
 
 # macOS
 .DS_Store
