@@ -84,13 +84,15 @@ def patch_swift_copts(build_dir):
     return True
 
 
-def patch_bazelrc_developer_dir(build_dir):
-    """Add DEVELOPER_DIR action_env to .bazelrc.
+def patch_bazelrc_action_env(build_dir):
+    """Add action_env entries to .bazelrc for ibtool platform discovery.
 
-    On macOS 15+, ibtool (invoked by Bazel's xctoolrunner) may fail to find
+    On macOS 15+, ibtool (invoked by Bazel's xctoolrunner) fails to find
     the iOS platform because xctoolrunner runs tools with `env -` (clearing
-    all environment variables). The --action_env flag makes Bazel pass
-    DEVELOPER_DIR through to build actions so ibtool can locate the platform.
+    all environment variables). Apple's platform resolution framework needs
+    DEVELOPER_DIR, HOME, and TMPDIR to locate registered platforms.
+
+    The --action_env flag makes Bazel pass these through to build actions.
     """
     import subprocess
 
@@ -107,18 +109,34 @@ def patch_bazelrc_developer_dir(build_dir):
     with open(bazelrc_path, "r") as f:
         content = f.read()
 
-    action_env_line = f"build --action_env=DEVELOPER_DIR={developer_dir}"
+    # Pass through env vars needed by Apple dev tools (ibtool, actool, etc.)
+    env_vars = {
+        "DEVELOPER_DIR": developer_dir,
+        "HOME": None,      # pass through from host
+        "TMPDIR": None,     # pass through from host
+    }
 
-    if "action_env=DEVELOPER_DIR" in content:
-        print(f"[3] DEVELOPER_DIR already set in {bazelrc_path}")
+    lines_to_add = []
+    for var, value in env_vars.items():
+        key = f"action_env={var}"
+        if key in content:
+            print(f"[3] {var} already set in {bazelrc_path}")
+            continue
+        if value:
+            lines_to_add.append(f"build --action_env={var}={value}")
+        else:
+            lines_to_add.append(f"build --action_env={var}")
+
+    if not lines_to_add:
         return True
 
-    content = content + "\n" + action_env_line + "\n"
+    content = content + "\n" + "\n".join(lines_to_add) + "\n"
 
     with open(bazelrc_path, "w") as f:
         f.write(content)
 
-    print(f"[3] Added {action_env_line} to {bazelrc_path}")
+    for line in lines_to_add:
+        print(f"[3] Added: {line}")
     return True
 
 
@@ -135,7 +153,7 @@ def main():
 
     patch_copy_profiles(build_dir)
     patch_swift_copts(build_dir)
-    patch_bazelrc_developer_dir(build_dir)
+    patch_bazelrc_action_env(build_dir)
 
 
 if __name__ == "__main__":

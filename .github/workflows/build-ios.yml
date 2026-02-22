@@ -136,6 +136,59 @@ jobs:
         run: |
           python3 scripts/patch_build_configuration.py telegram-ios-build
 
+      - name: Verify ibtool can compile XIBs
+        run: |
+          echo "=== Testing ibtool directly ==="
+          mkdir -p /tmp/ibtool-test
+
+          # Test 1: ibtool with full environment (should work)
+          echo "Test 1: ibtool with full environment"
+          xcrun ibtool --compile /tmp/ibtool-test/LaunchScreen.nib \
+            --minimum-deployment-target 13.0 \
+            --target-device iphone --target-device ipad \
+            --module Telegram \
+            telegram-ios-build/Telegram/Telegram-iOS/Base.lproj/LaunchScreen.xib \
+            && echo "PASS: ibtool works with full env" \
+            || echo "FAIL: ibtool fails even with full env"
+
+          # Test 2: ibtool with stripped environment (mimics Bazel)
+          echo ""
+          echo "Test 2: ibtool with stripped environment (like Bazel)"
+          env -i \
+            DEVELOPER_DIR="$(xcode-select -p)" \
+            HOME="$HOME" \
+            TMPDIR="${TMPDIR:-/tmp}" \
+            PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+            APPLE_SDK_PLATFORM=iPhoneOS \
+            APPLE_SDK_VERSION_OVERRIDE=18.2 \
+            XCODE_VERSION_OVERRIDE=16.2.0.16C5032a \
+            xcrun ibtool --compile /tmp/ibtool-test/LaunchScreen2.nib \
+            --minimum-deployment-target 13.0 \
+            --target-device iphone --target-device ipad \
+            --module Telegram \
+            telegram-ios-build/Telegram/Telegram-iOS/Base.lproj/LaunchScreen.xib \
+            && echo "PASS: ibtool works with stripped env + HOME" \
+            || echo "FAIL: ibtool fails with stripped env + HOME"
+
+          # Test 3: ibtool with only DEVELOPER_DIR (no HOME)
+          echo ""
+          echo "Test 3: ibtool with stripped env, no HOME"
+          env -i \
+            DEVELOPER_DIR="$(xcode-select -p)" \
+            PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+            APPLE_SDK_PLATFORM=iPhoneOS \
+            APPLE_SDK_VERSION_OVERRIDE=18.2 \
+            XCODE_VERSION_OVERRIDE=16.2.0.16C5032a \
+            xcrun ibtool --compile /tmp/ibtool-test/LaunchScreen3.nib \
+            --minimum-deployment-target 13.0 \
+            --target-device iphone --target-device ipad \
+            --module Telegram \
+            telegram-ios-build/Telegram/Telegram-iOS/Base.lproj/LaunchScreen.xib \
+            && echo "PASS: ibtool works without HOME" \
+            || echo "FAIL: ibtool fails without HOME"
+
+          rm -rf /tmp/ibtool-test
+
       - name: Build IPA
         working-directory: telegram-ios-build
         run: |
