@@ -16,8 +16,6 @@ jobs:
     env:
       TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
       TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
-      BUNDLE_ID: ${{ secrets.BUNDLE_ID || 'com.aitranslate.messenger' }}
-      TEAM_ID: ${{ secrets.TEAM_ID || 'PLACEHOLDER' }}
 
     steps:
       - name: Checkout repository
@@ -55,22 +53,26 @@ jobs:
           API_ID="${TELEGRAM_API_ID:-12345}"
           API_HASH="${TELEGRAM_API_HASH:-abcdef1234567890abcdef1234567890}"
 
-          cat > telegram-ios-build/build-system/appstore-configuration.json << 'CONFIGEOF'
-          {
-            "bundle_id": "com.aitranslate.messenger",
-            "api_id": "12345",
-            "api_hash": "abcdef1234567890abcdef1234567890",
-            "team_id": "PLACEHOLDER",
-            "app_center_id": "0",
-            "is_internal_build": "true",
-            "is_appstore_build": "false",
-            "appstore_id": "0",
-            "app_specific_url_scheme": "tg",
-            "premium_iap_product_id": "",
-            "enable_siri": false,
-            "enable_icloud": false
+          # Use the same team_id and bundle_id as the fake-codesigning profiles
+          # so that copy_profiles_from_directory matches them correctly
+          python3 -c "
+          import json, pathlib
+          cfg = {
+              'bundle_id': 'ph.telegra.Telegraph',
+              'api_id': '${API_ID}',
+              'api_hash': '${API_HASH}',
+              'team_id': 'C67CF9S4VU',
+              'app_center_id': '0',
+              'is_internal_build': 'true',
+              'is_appstore_build': 'false',
+              'appstore_id': '0',
+              'app_specific_url_scheme': 'tg',
+              'premium_iap_product_id': '',
+              'enable_siri': False,
+              'enable_icloud': False
           }
-          CONFIGEOF
+          pathlib.Path('telegram-ios-build/build-system/appstore-configuration.json').write_text(json.dumps(cfg, indent=2))
+          "
 
           echo "Build configuration written"
 
@@ -84,14 +86,6 @@ jobs:
           echo ""
 
           echo "=== Starting build ==="
-          # Patch Make.py to skip aps-environment provisioning check
-          # (not needed for debug builds without push notifications)
-          sed -i '' "s/print('Could not find a valid aps-environment/pass #/" build-system/Make/Make.py
-          sed -i '' 's/sys.exit(1)/pass/' build-system/Make/Make.py
-
-          # Set aps_environment to 'development' if None
-          sed -i '' 's/if codesigning_data.aps_environment is None:/codesigning_data.aps_environment = codesigning_data.aps_environment or "development"\n    if False:/' build-system/Make/Make.py
-
           python3 build-system/Make/Make.py \
             build \
             --configurationPath=build-system/appstore-configuration.json \
