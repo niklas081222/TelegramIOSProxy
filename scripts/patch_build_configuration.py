@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Patch BuildConfiguration.py to directly copy fake provisioning profiles.
+"""Patch Telegram-iOS build system files for CI builds.
 
-Replaces copy_profiles_from_directory with a simple glob-based copy
-that avoids the fragile openssl smime plist-matching logic.
+1. Replace copy_profiles_from_directory with a simple glob-based copy.
+2. Fix Swift compiler opts quoting issue in Make.py for Bazel 8.x.
 """
 
 import sys
 import os
+import re
 
 
 def patch_copy_profiles(build_dir):
@@ -43,7 +44,42 @@ def patch_copy_profiles(build_dir):
     with open(config_path, "w") as f:
         f.write(content)
 
-    print(f"Patched copy_profiles_from_directory in {config_path}")
+    print(f"[1] Patched copy_profiles_from_directory in {config_path}")
+    return True
+
+
+def patch_swift_copts(build_dir):
+    """Fix Swift compiler opts quoting in Make.py for Bazel 8.x.
+
+    In Make.py, common_debug_args contains:
+        '--@build_bazel_rules_swift//swift:copt="-j2"'
+        '--@build_bazel_rules_swift//swift:copt="-whole-module-optimization"'
+
+    The literal double quotes around the values cause Bazel 8.x to pass them
+    as-is to swiftc, which interprets them as filenames instead of flags.
+    Remove the extraneous quotes.
+    """
+    make_path = os.path.join(build_dir, "build-system", "Make", "Make.py")
+
+    with open(make_path, "r") as f:
+        content = f.read()
+
+    # Remove the embedded double quotes from copt values
+    # Pattern: copt="-something" -> copt=-something
+    original = content
+    content = re.sub(
+        r'''(--@build_bazel_rules_swift//swift:copt=)["']([^"']+)["']''',
+        r'\1\2',
+        content
+    )
+
+    if content != original:
+        with open(make_path, "w") as f:
+            f.write(content)
+        print(f"[2] Fixed Swift copt quoting in {make_path}")
+    else:
+        print(f"[2] No Swift copt quoting issues found in {make_path}")
+
     return True
 
 
@@ -59,6 +95,7 @@ def main():
         sys.exit(1)
 
     patch_copy_profiles(build_dir)
+    patch_swift_copts(build_dir)
 
 
 if __name__ == "__main__":
