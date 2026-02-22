@@ -98,9 +98,7 @@ jobs:
             --configurationPath=build-system/appstore-configuration.json \
             --codesigningInformationPath=build-system/fake-codesigning \
             --buildNumber=${{ github.run_number }} \
-            --configuration=debug_arm64 \
-            --disableProvisioningProfiles \
-            --disableExtensions
+            --configuration=debug_arm64
 
           echo "=== Build complete ==="
 
