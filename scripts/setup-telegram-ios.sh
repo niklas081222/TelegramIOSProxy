@@ -6,7 +6,7 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 TARGET_DIR="${PROJECT_DIR}/telegram-ios-build"
 
 # Telegram-iOS repo (official)
-TELEGRAM_REPO="https://github.com/nicegram/nicegram-ios.git"
+TELEGRAM_REPO="https://github.com/TelegramMessenger/Telegram-iOS.git"
 
 echo "=== TranslateGram iOS Build Setup ==="
 echo "Project directory: ${PROJECT_DIR}"

@@ -4,6 +4,9 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+    paths-ignore:
+      - 'proxy-server/**'
+      - '**.md'
 
 jobs:
   build:
@@ -25,11 +28,17 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Clone Telegram-iOS and apply modifications
+      - name: Clone Telegram-iOS
         run: |
-          echo "=== Cloning Nicegram-iOS ==="
-          git clone --recursive --depth 1 https://github.com/nicegram/nicegram-ios.git telegram-ios-build
+          echo "=== Cloning official Telegram-iOS ==="
+          git clone --depth 1 https://github.com/TelegramMessenger/Telegram-iOS.git telegram-ios-build
+          cd telegram-ios-build
+          git submodule update --init --recursive --depth 1
+          cd ..
+          echo "=== Clone complete ==="
 
+      - name: Apply modifications
+        run: |
           echo "=== Copying AITranslation module ==="
           cp -r telegram-ios/AITranslation telegram-ios-build/submodules/AITranslation
 
@@ -40,9 +49,9 @@ jobs:
         id: xcode-version
         run: |
           if [ -f "telegram-ios-build/versions.json" ]; then
-            XCODE_VERSION=$(python3 -c "import json; print(json.load(open('telegram-ios-build/versions.json'))['xcode'])" 2>/dev/null || echo "16.0")
+            XCODE_VERSION=$(python3 -c "import json; print(json.load(open('telegram-ios-build/versions.json'))['xcode'])" 2>/dev/null || echo "16.2")
           else
-            XCODE_VERSION="16.0"
+            XCODE_VERSION="16.2"
           fi
           echo "version=${XCODE_VERSION}" >> $GITHUB_OUTPUT
           echo "Xcode version: ${XCODE_VERSION}"
@@ -57,12 +66,12 @@ jobs:
           API_ID="${TELEGRAM_API_ID:-12345}"
           API_HASH="${TELEGRAM_API_HASH:-abcdef1234567890abcdef1234567890}"
 
-          cat > telegram-ios-build/build-system/appstore-configuration.json << CONFIGEOF
+          cat > telegram-ios-build/build-system/appstore-configuration.json << 'CONFIGEOF'
           {
-            "bundle_id": "${BUNDLE_ID}",
-            "api_id": "${API_ID}",
-            "api_hash": "${API_HASH}",
-            "team_id": "${TEAM_ID}",
+            "bundle_id": "com.aitranslate.messenger",
+            "api_id": "12345",
+            "api_hash": "abcdef1234567890abcdef1234567890",
+            "team_id": "PLACEHOLDER",
             "app_center_id": "0",
             "is_internal_build": "true",
             "is_appstore_build": "false",
@@ -74,13 +83,29 @@ jobs:
           }
           CONFIGEOF
 
+          # Override with secrets if available
+          if [ -n "$API_ID" ] && [ "$API_ID" != "12345" ]; then
+            python3 -c "
+          import json
+          with open('telegram-ios-build/build-system/appstore-configuration.json') as f:
+              config = json.load(f)
+          config['api_id'] = '${API_ID}'
+          config['api_hash'] = '${API_HASH}'
+          config['bundle_id'] = '${BUNDLE_ID}'
+          config['team_id'] = '${TEAM_ID}'
+          with open('telegram-ios-build/build-system/appstore-configuration.json', 'w') as f:
+              json.dump(config, f, indent=2)
+          "
+          fi
+
           echo "Build configuration written"
+          cat telegram-ios-build/build-system/appstore-configuration.json
 
       - name: Setup Bazel cache
         uses: actions/cache@v4
         with:
           path: ~/bazel-disk-cache
-          key: bazel-${{ runner.os }}-${{ hashFiles('telegram-ios-build/WORKSPACE', 'telegram-ios-build/versions.json') }}
+          key: bazel-${{ runner.os }}-${{ hashFiles('telegram-ios-build/versions.json') }}
           restore-keys: |
             bazel-${{ runner.os }}-
 
@@ -88,6 +113,11 @@ jobs:
         working-directory: telegram-ios-build
         run: |
           echo "=== Starting build ==="
+          echo "Available Xcode versions:"
+          ls /Applications/ | grep Xcode || true
+          echo "Active Xcode:"
+          xcode-select -p
+          xcodebuild -version
 
           python3 build-system/Make/Make.py \
             --cacheDir="$HOME/bazel-disk-cache" \
@@ -96,27 +126,28 @@ jobs:
             --codesigningInformationPath=build-system/fake-codesigning \
             --buildNumber=${{ github.run_number }} \
             --configuration=debug_arm64 \
-            --disableProvisioningProfiles
+            --disableProvisioningProfiles \
+            --disableExtensions
 
           echo "=== Build complete ==="
 
       - name: Find and collect artifacts
+        if: always()
         run: |
           echo "=== Searching for build artifacts ==="
           mkdir -p artifacts
 
-          # Look for IPA files
-          find telegram-ios-build/build -name "*.ipa" -exec cp {} artifacts/ \; 2>/dev/null || true
-          find telegram-ios-build/bazel-out -name "*.ipa" -exec cp {} artifacts/ \; 2>/dev/null || true
-          find telegram-ios-build -maxdepth 3 -name "*.ipa" -exec cp {} artifacts/ \; 2>/dev/null || true
+          # Look for IPA files anywhere in the build tree
+          find telegram-ios-build -name "*.ipa" -exec cp {} artifacts/ \; 2>/dev/null || true
 
           # Look for app bundles
-          find telegram-ios-build/build -name "*.app" -exec cp -r {} artifacts/ \; 2>/dev/null || true
+          find telegram-ios-build/build -name "*.app" -maxdepth 3 -exec cp -r {} artifacts/ \; 2>/dev/null || true
 
           echo "Artifacts found:"
-          ls -la artifacts/ || echo "No artifacts directory"
+          ls -la artifacts/ 2>/dev/null || echo "No artifacts found"
 
       - name: Upload IPA artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: translategram-ios-${{ github.run_number }}

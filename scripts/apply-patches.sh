@@ -14,8 +14,9 @@ BUILD_FILE="${TARGET_DIR}/submodules/TelegramUI/BUILD"
 if grep -q "AITranslation" "$BUILD_FILE" 2>/dev/null; then
     echo "    Already present, skipping."
 else
-    # Add to NGDEPS array (after the first line)
-    sed -i '/^NGDEPS = \[/a\    "//submodules/AITranslation:AITranslation",' "$BUILD_FILE"
+    # Official Telegram-iOS has deps = [ at line ~51
+    # Add our module after the first entry in deps
+    sed -i '/deps = \[/a\        "//submodules/AITranslation:AITranslation",' "$BUILD_FILE"
     echo "    Done."
 fi
 
@@ -25,10 +26,10 @@ APPDELEGATE="${TARGET_DIR}/submodules/TelegramUI/Sources/AppDelegate.swift"
 if grep -q "import AITranslation" "$APPDELEGATE" 2>/dev/null; then
     echo "    Already patched, skipping."
 else
-    # Add import after 'import Display'
-    sed -i '/^import Display$/a import AITranslation' "$APPDELEGATE"
+    # Add import after 'import UIKit'
+    sed -i '/^import UIKit$/a import AITranslation' "$APPDELEGATE"
     # Add registration call after 'testIsLaunched = true'
-    sed -i '/testIsLaunched = true/a\        registerAITranslationService()' "$APPDELEGATE"
+    sed -i '/testIsLaunched = true$/a\        registerAITranslationService()' "$APPDELEGATE"
     echo "    Done."
 fi
 
@@ -38,7 +39,7 @@ CHAT_CTRL="${TARGET_DIR}/submodules/TelegramUI/Sources/ChatController.swift"
 if grep -q "import AITranslation" "$CHAT_CTRL" 2>/dev/null; then
     echo "    Already patched, skipping."
 else
-    # Add import at top
+    # Add import at top (after import UIKit)
     sed -i '/^import UIKit$/a import AITranslation' "$CHAT_CTRL"
 
     # Use Python for the more complex sendMessages modification
