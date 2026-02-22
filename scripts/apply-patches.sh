@@ -6,6 +6,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 PATCHES_DIR="${PROJECT_DIR}/telegram-ios/patches"
 
+# macOS-compatible sed in-place (macOS sed requires -i '')
+sedi() {
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        sed -i '' "$@"
+    else
+        sed -i "$@"
+    fi
+}
+
 echo "Applying modifications to ${TARGET_DIR}..."
 
 # 1. Add AITranslation dependency to TelegramUI/BUILD
@@ -14,9 +23,9 @@ BUILD_FILE="${TARGET_DIR}/submodules/TelegramUI/BUILD"
 if grep -q "AITranslation" "$BUILD_FILE" 2>/dev/null; then
     echo "    Already present, skipping."
 else
-    # Official Telegram-iOS has deps = [ at line ~51
-    # Add our module after the first entry in deps
-    sed -i '/deps = \[/a\        "//submodules/AITranslation:AITranslation",' "$BUILD_FILE"
+    # Add our module right after 'deps = ['
+    sedi '/deps = \[/a\
+        "//submodules/AITranslation:AITranslation",' "$BUILD_FILE"
     echo "    Done."
 fi
 
@@ -27,9 +36,11 @@ if grep -q "import AITranslation" "$APPDELEGATE" 2>/dev/null; then
     echo "    Already patched, skipping."
 else
     # Add import after 'import UIKit'
-    sed -i '/^import UIKit$/a import AITranslation' "$APPDELEGATE"
+    sedi '/^import UIKit$/a\
+import AITranslation' "$APPDELEGATE"
     # Add registration call after 'testIsLaunched = true'
-    sed -i '/testIsLaunched = true$/a\        registerAITranslationService()' "$APPDELEGATE"
+    sedi '/testIsLaunched = true$/a\
+        registerAITranslationService()' "$APPDELEGATE"
     echo "    Done."
 fi
 
@@ -40,7 +51,8 @@ if grep -q "import AITranslation" "$CHAT_CTRL" 2>/dev/null; then
     echo "    Already patched, skipping."
 else
     # Add import at top (after import UIKit)
-    sed -i '/^import UIKit$/a import AITranslation' "$CHAT_CTRL"
+    sedi '/^import UIKit$/a\
+import AITranslation' "$CHAT_CTRL"
 
     # Use Python for the more complex sendMessages modification
     python3 "${SCRIPT_DIR}/patch_chat_controller.py" "$CHAT_CTRL"
