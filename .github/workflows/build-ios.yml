@@ -74,14 +74,6 @@ jobs:
 
           echo "Build configuration written"
 
-      - name: Setup Bazel cache
-        uses: actions/cache@v4
-        with:
-          path: ~/bazel-disk-cache
-          key: bazel-${{ runner.os }}-v1
-          restore-keys: |
-            bazel-${{ runner.os }}-
-
       - name: Build IPA
         working-directory: telegram-ios-build
         run: |
@@ -93,7 +85,6 @@ jobs:
 
           echo "=== Starting build ==="
           python3 build-system/Make/Make.py \
-            --cacheDir="$HOME/bazel-disk-cache" \
             build \
             --configurationPath=build-system/appstore-configuration.json \
             --codesigningInformationPath=build-system/fake-codesigning \
