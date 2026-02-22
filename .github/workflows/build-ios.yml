@@ -54,7 +54,6 @@ jobs:
           API_HASH="${TELEGRAM_API_HASH:-abcdef1234567890abcdef1234567890}"
 
           # Use the same team_id and bundle_id as the fake-codesigning profiles
-          # so that copy_profiles_from_directory matches them correctly
           python3 -c "
           import json, pathlib
           cfg = {
@@ -75,6 +74,79 @@ jobs:
           "
 
           echo "Build configuration written"
+          cat telegram-ios-build/build-system/appstore-configuration.json
+
+      - name: Patch profile copying to use macOS security cms
+        working-directory: telegram-ios-build
+        run: |
+          # The copy_profiles_from_directory function in BuildConfiguration.py uses
+          # openssl smime which may not work with macOS LibreSSL.
+          # Patch it to fall back to 'security cms -D' (macOS native) if openssl fails.
+          python3 << 'PYEOF'
+          import re
+
+          path = "build-system/Make/BuildConfiguration.py"
+          with open(path, "r") as f:
+              content = f.read()
+
+          # Find and replace the openssl smime call with a version that falls back to security cms
+          old_pattern = "profile_data = subprocess.check_output(['openssl', 'smime', '-inform', 'der', '-verify', '-noverify', '-in', file_path])"
+
+          new_code = """try:
+                    profile_data = subprocess.check_output(['openssl', 'smime', '-inform', 'der', '-verify', '-noverify', '-in', file_path], stderr=subprocess.DEVNULL)
+                except subprocess.CalledProcessError:
+                    # Fallback: use macOS security cms tool
+                    profile_data = subprocess.check_output(['security', 'cms', '-D', '-i', file_path])"""
+
+          if old_pattern in content:
+              content = content.replace(old_pattern, new_code)
+              print("Patched openssl smime -> security cms fallback")
+          else:
+              # Try a more flexible approach - find any line with openssl smime
+              lines = content.split('\n')
+              new_lines = []
+              patched = False
+              for line in lines:
+                  if 'openssl' in line and 'smime' in line and 'profile_data' in line:
+                      indent = len(line) - len(line.lstrip())
+                      spaces = ' ' * indent
+                      new_lines.append(f"{spaces}try:")
+                      new_lines.append(f"{spaces}    profile_data = subprocess.check_output(['openssl', 'smime', '-inform', 'der', '-verify', '-noverify', '-in', file_path], stderr=subprocess.DEVNULL)")
+                      new_lines.append(f"{spaces}except subprocess.CalledProcessError:")
+                      new_lines.append(f"{spaces}    profile_data = subprocess.check_output(['security', 'cms', '-D', '-i', file_path])")
+                      patched = True
+                  else:
+                      new_lines.append(line)
+              if patched:
+                  content = '\n'.join(new_lines)
+                  print("Patched openssl smime (flexible match) -> security cms fallback")
+              else:
+                  print("WARNING: Could not find openssl smime call to patch")
+
+          with open(path, "w") as f:
+              f.write(content)
+
+          # Debug: print the patched function
+          print("\n--- Patched copy_profiles_from_directory ---")
+          in_func = False
+          for line in content.split('\n'):
+              if 'def copy_profiles_from_directory' in line:
+                  in_func = True
+              if in_func:
+                  print(line)
+                  if line.strip().startswith('def ') and 'copy_profiles_from_directory' not in line:
+                      break
+          PYEOF
+
+          # Also debug: test openssl and security cms on a profile
+          echo "=== Testing profile parsing tools ==="
+          echo "openssl version:"
+          openssl version || true
+          echo ""
+          echo "Testing openssl smime on Telegram.mobileprovision:"
+          openssl smime -inform der -verify -noverify -in build-system/fake-codesigning/profiles/Telegram.mobileprovision > /dev/null 2>&1 && echo "  SUCCESS" || echo "  FAILED"
+          echo "Testing security cms on Telegram.mobileprovision:"
+          security cms -D -i build-system/fake-codesigning/profiles/Telegram.mobileprovision > /dev/null 2>&1 && echo "  SUCCESS" || echo "  FAILED"
 
       - name: Build IPA
         working-directory: telegram-ios-build
@@ -104,6 +176,11 @@ jobs:
           find telegram-ios-build -name "*.ipa" -exec cp {} artifacts/ \; 2>/dev/null || true
           find telegram-ios-build/build -name "*.app" -maxdepth 3 -exec cp -r {} artifacts/ \; 2>/dev/null || true
 
+          # Debug: show what's in the configuration repository
+          echo "=== Configuration repository contents ==="
+          find telegram-ios-build/build-input/configuration-repository -type f 2>/dev/null || echo "No configuration repository found"
+
+          echo ""
           echo "Artifacts found:"
           ls -la artifacts/ 2>/dev/null || echo "No artifacts found"
 
