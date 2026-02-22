@@ -76,58 +76,47 @@ jobs:
           echo "Build configuration written"
           cat telegram-ios-build/build-system/appstore-configuration.json
 
-      - name: Patch profile copying to use macOS security cms
+      - name: Patch profile copying to directly copy fake profiles
         working-directory: telegram-ios-build
         run: |
-          # The copy_profiles_from_directory function in BuildConfiguration.py uses
-          # openssl smime which may not work with macOS LibreSSL.
-          # Patch it to fall back to 'security cms -D' (macOS native) if openssl fails.
+          # Replace copy_profiles_from_directory with a simple direct-copy version.
+          # The fake-codesigning profiles are already named correctly (Telegram.mobileprovision,
+          # Share.mobileprovision, etc.) so we don't need the openssl/plist matching logic.
           python3 << 'PYEOF'
-          import re
-
           path = "build-system/Make/BuildConfiguration.py"
           with open(path, "r") as f:
               content = f.read()
 
-          # Find and replace the openssl smime call with a version that falls back to security cms
-          old_pattern = "profile_data = subprocess.check_output(['openssl', 'smime', '-inform', 'der', '-verify', '-noverify', '-in', file_path])"
+          # Replace the entire copy_profiles_from_directory function
+          old_func_start = "def copy_profiles_from_directory(source_path, destination_path, team_id, bundle_id):"
+          old_func_end = "\ndef resolve_aps_environment_from_directory("
 
-          new_code = """try:
-                    profile_data = subprocess.check_output(['openssl', 'smime', '-inform', 'der', '-verify', '-noverify', '-in', file_path], stderr=subprocess.DEVNULL)
-                except subprocess.CalledProcessError:
-                    # Fallback: use macOS security cms tool
-                    profile_data = subprocess.check_output(['security', 'cms', '-D', '-i', file_path])"""
+          if old_func_start in content and old_func_end in content:
+              before = content[:content.index(old_func_start)]
+              after = content[content.index(old_func_end):]
 
-          if old_pattern in content:
-              content = content.replace(old_pattern, new_code)
-              print("Patched openssl smime -> security cms fallback")
+              new_func = """def copy_profiles_from_directory(source_path, destination_path, team_id, bundle_id):
+    # Simplified: directly copy all .mobileprovision files from source to destination
+    import glob
+    for file_path in glob.glob(os.path.join(source_path, '*.mobileprovision')):
+        file_name = os.path.basename(file_path)
+        dest_file = os.path.join(destination_path, file_name)
+        shutil.copyfile(file_path, dest_file)
+        print('Copied profile: {} -> {}'.format(file_name, dest_file))
+
+"""
+              content = before + new_func + after
+              print("SUCCESS: Replaced copy_profiles_from_directory with direct-copy version")
           else:
-              # Try a more flexible approach - find any line with openssl smime
-              lines = content.split('\n')
-              new_lines = []
-              patched = False
-              for line in lines:
-                  if 'openssl' in line and 'smime' in line and 'profile_data' in line:
-                      indent = len(line) - len(line.lstrip())
-                      spaces = ' ' * indent
-                      new_lines.append(f"{spaces}try:")
-                      new_lines.append(f"{spaces}    profile_data = subprocess.check_output(['openssl', 'smime', '-inform', 'der', '-verify', '-noverify', '-in', file_path], stderr=subprocess.DEVNULL)")
-                      new_lines.append(f"{spaces}except subprocess.CalledProcessError:")
-                      new_lines.append(f"{spaces}    profile_data = subprocess.check_output(['security', 'cms', '-D', '-i', file_path])")
-                      patched = True
-                  else:
-                      new_lines.append(line)
-              if patched:
-                  content = '\n'.join(new_lines)
-                  print("Patched openssl smime (flexible match) -> security cms fallback")
-              else:
-                  print("WARNING: Could not find openssl smime call to patch")
+              print("ERROR: Could not find function boundaries")
+              print(f"  Found start: {old_func_start in content}")
+              print(f"  Found end: {old_func_end in content}")
 
           with open(path, "w") as f:
               f.write(content)
 
-          # Debug: print the patched function
-          print("\n--- Patched copy_profiles_from_directory ---")
+          # Also print the new function to verify
+          print("\n--- New copy_profiles_from_directory ---")
           in_func = False
           for line in content.split('\n'):
               if 'def copy_profiles_from_directory' in line:
@@ -137,16 +126,6 @@ jobs:
                   if line.strip().startswith('def ') and 'copy_profiles_from_directory' not in line:
                       break
           PYEOF
-
-          # Also debug: test openssl and security cms on a profile
-          echo "=== Testing profile parsing tools ==="
-          echo "openssl version:"
-          openssl version || true
-          echo ""
-          echo "Testing openssl smime on Telegram.mobileprovision:"
-          openssl smime -inform der -verify -noverify -in build-system/fake-codesigning/profiles/Telegram.mobileprovision > /dev/null 2>&1 && echo "  SUCCESS" || echo "  FAILED"
-          echo "Testing security cms on Telegram.mobileprovision:"
-          security cms -D -i build-system/fake-codesigning/profiles/Telegram.mobileprovision > /dev/null 2>&1 && echo "  SUCCESS" || echo "  FAILED"
 
       - name: Build IPA
         working-directory: telegram-ios-build
