@@ -10,7 +10,7 @@ on:
 
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 180
 
     env:
@@ -28,10 +28,10 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Clone Telegram-iOS
+      - name: Clone Telegram-iOS (release-11.13, Xcode 16.2)
         run: |
-          echo "=== Cloning official Telegram-iOS ==="
-          git clone --depth 1 https://github.com/TelegramMessenger/Telegram-iOS.git telegram-ios-build
+          echo "=== Cloning official Telegram-iOS at release-11.13 ==="
+          git clone --branch release-11.13 --depth 1 https://github.com/TelegramMessenger/Telegram-iOS.git telegram-ios-build
           cd telegram-ios-build
           git submodule update --init --recursive --depth 1
           cd ..
@@ -45,21 +45,10 @@ jobs:
           echo "=== Applying patches ==="
           bash scripts/apply-patches.sh telegram-ios-build
 
-      - name: Determine Xcode version
-        id: xcode-version
-        run: |
-          if [ -f "telegram-ios-build/versions.json" ]; then
-            XCODE_VERSION=$(python3 -c "import json; print(json.load(open('telegram-ios-build/versions.json'))['xcode'])" 2>/dev/null || echo "16.2")
-          else
-            XCODE_VERSION="16.2"
-          fi
-          echo "version=${XCODE_VERSION}" >> $GITHUB_OUTPUT
-          echo "Xcode version: ${XCODE_VERSION}"
-
-      - name: Setup Xcode
+      - name: Setup Xcode 16.2
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: ${{ steps.xcode-version.outputs.version }}
+          xcode-version: '16.2'
 
       - name: Write build configuration
         run: |
@@ -83,42 +72,26 @@ jobs:
           }
           CONFIGEOF
 
-          # Override with secrets if available
-          if [ -n "$API_ID" ] && [ "$API_ID" != "12345" ]; then
-            python3 -c "
-          import json
-          with open('telegram-ios-build/build-system/appstore-configuration.json') as f:
-              config = json.load(f)
-          config['api_id'] = '${API_ID}'
-          config['api_hash'] = '${API_HASH}'
-          config['bundle_id'] = '${BUNDLE_ID}'
-          config['team_id'] = '${TEAM_ID}'
-          with open('telegram-ios-build/build-system/appstore-configuration.json', 'w') as f:
-              json.dump(config, f, indent=2)
-          "
-          fi
-
           echo "Build configuration written"
-          cat telegram-ios-build/build-system/appstore-configuration.json
 
       - name: Setup Bazel cache
         uses: actions/cache@v4
         with:
           path: ~/bazel-disk-cache
-          key: bazel-${{ runner.os }}-${{ hashFiles('telegram-ios-build/versions.json') }}
+          key: bazel-${{ runner.os }}-v1
           restore-keys: |
             bazel-${{ runner.os }}-
 
       - name: Build IPA
         working-directory: telegram-ios-build
         run: |
-          echo "=== Starting build ==="
-          echo "Available Xcode versions:"
-          ls /Applications/ | grep Xcode || true
-          echo "Active Xcode:"
+          echo "=== Build environment ==="
           xcode-select -p
           xcodebuild -version
+          python3 --version
+          echo ""
 
+          echo "=== Starting build ==="
           python3 build-system/Make/Make.py \
             --cacheDir="$HOME/bazel-disk-cache" \
             build \
@@ -137,10 +110,7 @@ jobs:
           echo "=== Searching for build artifacts ==="
           mkdir -p artifacts
 
-          # Look for IPA files anywhere in the build tree
           find telegram-ios-build -name "*.ipa" -exec cp {} artifacts/ \; 2>/dev/null || true
-
-          # Look for app bundles
           find telegram-ios-build/build -name "*.app" -maxdepth 3 -exec cp -r {} artifacts/ \; 2>/dev/null || true
 
           echo "Artifacts found:"
