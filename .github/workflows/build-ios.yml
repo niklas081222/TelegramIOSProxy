@@ -75,6 +75,10 @@ jobs:
           echo "Build configuration written"
           cat telegram-ios-build/build-system/appstore-configuration.json
 
+      - name: Fix expired provisioning profiles
+        run: |
+          python3 scripts/fix_profile_expiration.py telegram-ios-build
+
       - name: Patch profile copying to directly copy fake profiles
         run: |
           python3 scripts/patch_build_configuration.py telegram-ios-build
