@@ -87,7 +87,7 @@ jobs:
           python3 build-system/Make/Make.py \
             build \
             --configurationPath=build-system/appstore-configuration.json \
-            --codesigningInformationPath=build-system/fake-codesigning \
+            --xcodeManagedCodesigning \
             --buildNumber=${{ github.run_number }} \
             --configuration=debug_arm64
 
