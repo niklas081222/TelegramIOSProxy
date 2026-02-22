@@ -53,7 +53,6 @@ jobs:
           API_ID="${TELEGRAM_API_ID:-12345}"
           API_HASH="${TELEGRAM_API_HASH:-abcdef1234567890abcdef1234567890}"
 
-          # Use the same team_id and bundle_id as the fake-codesigning profiles
           python3 -c "
           import json, pathlib
           cfg = {
@@ -77,55 +76,8 @@ jobs:
           cat telegram-ios-build/build-system/appstore-configuration.json
 
       - name: Patch profile copying to directly copy fake profiles
-        working-directory: telegram-ios-build
         run: |
-          # Replace copy_profiles_from_directory with a simple direct-copy version.
-          # The fake-codesigning profiles are already named correctly (Telegram.mobileprovision,
-          # Share.mobileprovision, etc.) so we don't need the openssl/plist matching logic.
-          python3 << 'PYEOF'
-          path = "build-system/Make/BuildConfiguration.py"
-          with open(path, "r") as f:
-              content = f.read()
-
-          # Replace the entire copy_profiles_from_directory function
-          old_func_start = "def copy_profiles_from_directory(source_path, destination_path, team_id, bundle_id):"
-          old_func_end = "\ndef resolve_aps_environment_from_directory("
-
-          if old_func_start in content and old_func_end in content:
-              before = content[:content.index(old_func_start)]
-              after = content[content.index(old_func_end):]
-
-              new_func = """def copy_profiles_from_directory(source_path, destination_path, team_id, bundle_id):
-    # Simplified: directly copy all .mobileprovision files from source to destination
-    import glob
-    for file_path in glob.glob(os.path.join(source_path, '*.mobileprovision')):
-        file_name = os.path.basename(file_path)
-        dest_file = os.path.join(destination_path, file_name)
-        shutil.copyfile(file_path, dest_file)
-        print('Copied profile: {} -> {}'.format(file_name, dest_file))
-
-"""
-              content = before + new_func + after
-              print("SUCCESS: Replaced copy_profiles_from_directory with direct-copy version")
-          else:
-              print("ERROR: Could not find function boundaries")
-              print(f"  Found start: {old_func_start in content}")
-              print(f"  Found end: {old_func_end in content}")
-
-          with open(path, "w") as f:
-              f.write(content)
-
-          # Also print the new function to verify
-          print("\n--- New copy_profiles_from_directory ---")
-          in_func = False
-          for line in content.split('\n'):
-              if 'def copy_profiles_from_directory' in line:
-                  in_func = True
-              if in_func:
-                  print(line)
-                  if line.strip().startswith('def ') and 'copy_profiles_from_directory' not in line:
-                      break
-          PYEOF
+          python3 scripts/patch_build_configuration.py telegram-ios-build
 
       - name: Build IPA
         working-directory: telegram-ios-build
@@ -155,7 +107,6 @@ jobs:
           find telegram-ios-build -name "*.ipa" -exec cp {} artifacts/ \; 2>/dev/null || true
           find telegram-ios-build/build -name "*.app" -maxdepth 3 -exec cp -r {} artifacts/ \; 2>/dev/null || true
 
-          # Debug: show what's in the configuration repository
           echo "=== Configuration repository contents ==="
           find telegram-ios-build/build-input/configuration-repository -type f 2>/dev/null || echo "No configuration repository found"
 
