@@ -22,36 +22,19 @@ public final class ConversationContextProvider {
         return context.account.postbox.transaction { transaction -> [AIContextMessage] in
             let accountPeerId = context.account.peerId
 
-            // Read recent messages from the chat
+            // Read recent messages from the chat using scanTopMessages
             var messages: [Message] = []
-            let historyView = transaction.getMessagesInRange(
-                peerId: chatId,
-                namespace: Namespaces.Message.Cloud,
-                from: MessageIndex.upperBound(peerId: chatId, namespace: Namespaces.Message.Cloud),
-                to: MessageIndex.lowerBound(peerId: chatId, namespace: Namespaces.Message.Cloud),
-                limit: messageCount
-            )
-            messages = historyView
+            transaction.scanTopMessages(peerId: chatId, namespace: Namespaces.Message.Cloud, limit: messageCount) { message in
+                messages.append(message)
+                return true
+            }
 
-            // Also check local namespace for unsent messages
-            let localMessages = transaction.getMessagesInRange(
-                peerId: chatId,
-                namespace: Namespaces.Message.Local,
-                from: MessageIndex.upperBound(peerId: chatId, namespace: Namespaces.Message.Local),
-                to: MessageIndex.lowerBound(peerId: chatId, namespace: Namespaces.Message.Local),
-                limit: messageCount
-            )
-            messages.append(contentsOf: localMessages)
-
-            // Sort chronologically
+            // Sort chronologically (scanTopMessages returns newest first)
             messages.sort { $0.timestamp < $1.timestamp }
-
-            // Take only the last N messages
-            let recentMessages = messages.suffix(messageCount)
 
             // Convert to context messages
             var contextMessages: [AIContextMessage] = []
-            for message in recentMessages {
+            for message in messages {
                 let text = message.text
                 guard !text.isEmpty else { continue }
 

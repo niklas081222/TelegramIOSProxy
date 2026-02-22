@@ -1,8 +1,10 @@
 import Foundation
+import UIKit
 import Display
 import TelegramPresentationData
 import AccountContext
 import TelegramCore
+import Postbox
 
 /// A navigation bar button that toggles AI translation for the current chat.
 /// Shows "AI" text that is highlighted when translation is active.

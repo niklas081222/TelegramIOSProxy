@@ -111,10 +111,10 @@ private enum AISettingsEntry: ItemListNodeEntry {
                 action: { arguments.testConnection() }
             )
 
-        case let .connectionStatus(text, connected):
+        case let .connectionStatus(_, connected):
             return ItemListTextItem(
                 presentationData: presentationData,
-                text: .plain(connected ? "✓ Connected" : "✗ Not connected"),
+                text: .plain(connected ? "Connected" : "Not connected"),
                 sectionId: self.section
             )
 
@@ -256,6 +256,34 @@ private struct AISettingsState: Equatable {
     var isTesting: Bool = false
 }
 
+// MARK: - Entries generation
+
+private func aiSettingsEntries(state: AISettingsState) -> [AISettingsEntry] {
+    var entries: [AISettingsEntry] = []
+
+    entries.append(.connectionHeader("CONNECTION"))
+    entries.append(.proxyURL("Server URL", AITranslationSettings.proxyServerURL))
+    entries.append(.testConnection("Test Connection"))
+    entries.append(.connectionStatus("Status", state.isConnected))
+
+    entries.append(.translationHeader("TRANSLATION"))
+    entries.append(.globalToggle("Enable AI Translation", AITranslationSettings.enabled))
+    entries.append(.incomingToggle("Translate Incoming (DE > EN)", AITranslationSettings.autoTranslateIncoming))
+    entries.append(.outgoingToggle("Translate Outgoing (EN > DE)", AITranslationSettings.autoTranslateOutgoing))
+
+    entries.append(.devHeader("DEVELOPER SETTINGS"))
+    entries.append(.contextMode("Translation Context", AITranslationSettings.contextMode))
+    if AITranslationSettings.contextMode == 2 {
+        entries.append(.contextCount("Context Messages", AITranslationSettings.contextMessageCount))
+    }
+    entries.append(.showRawResponses("Show Raw API Responses", AITranslationSettings.showRawAPIResponses))
+
+    entries.append(.cacheHeader("CACHE"))
+    entries.append(.clearCache("Clear Translation Cache"))
+
+    return entries
+}
+
 // MARK: - Controller
 
 public func aiSettingsController(context: AccountContext) -> ViewController {
@@ -264,24 +292,17 @@ public func aiSettingsController(context: AccountContext) -> ViewController {
 
     let arguments = AISettingsArguments(
         editProxyURL: {
-            // Present a text input alert for the proxy URL
-            let presentationData = context.sharedContext.currentPresentationData.with { $0 }
-            let controller = textAlertController(
+            // Show alert with current URL info
+            let currentURL = AITranslationSettings.proxyServerURL
+            let alertController = textAlertController(
                 context: context,
                 title: "Proxy Server URL",
-                text: "Enter the URL of the translation proxy server",
+                text: currentURL.isEmpty ? "Not configured. Set proxyServerURL in UserDefaults (ai_translation:proxy_url)." : "Current: \(currentURL)",
                 actions: [
-                    TextAlertAction(type: .genericAction, title: "Cancel", action: {}),
-                    TextAlertAction(type: .defaultAction, title: "Save", action: { text in
-                        AITranslationSettings.proxyServerURL = text ?? ""
-                        AITranslationService.shared.updateProxyClient()
-                    })
-                ],
-                actionLayout: .horizontal,
-                inputPlaceholder: "https://your-server.com",
-                inputText: AITranslationSettings.proxyServerURL
+                    TextAlertAction(type: .defaultAction, title: "OK", action: {})
+                ]
             )
-            context.sharedContext.mainWindow?.present(controller, on: .root)
+            context.sharedContext.mainWindow?.present(alertController, on: .root)
         },
         testConnection: {
             let _ = stateValue.modify { state in
@@ -304,7 +325,6 @@ public func aiSettingsController(context: AccountContext) -> ViewController {
         },
         toggleGlobal: { value in
             AITranslationSettings.enabled = value
-            updateAITranslationServiceRegistration()
         },
         toggleIncoming: { value in
             AITranslationSettings.autoTranslateIncoming = value
@@ -317,24 +337,11 @@ public func aiSettingsController(context: AccountContext) -> ViewController {
             AITranslationSettings.contextMode = newMode
         },
         editContextCount: {
-            let presentationData = context.sharedContext.currentPresentationData.with { $0 }
-            let controller = textAlertController(
-                context: context,
-                title: "Context Message Count",
-                text: "How many recent messages to include as context (2-100)",
-                actions: [
-                    TextAlertAction(type: .genericAction, title: "Cancel", action: {}),
-                    TextAlertAction(type: .defaultAction, title: "Save", action: { text in
-                        if let count = Int(text ?? ""), count >= 2, count <= 100 {
-                            AITranslationSettings.contextMessageCount = count
-                        }
-                    })
-                ],
-                actionLayout: .horizontal,
-                inputPlaceholder: "20",
-                inputText: String(AITranslationSettings.contextMessageCount)
-            )
-            context.sharedContext.mainWindow?.present(controller, on: .root)
+            // Cycle through common values: 5, 10, 20, 50, 100
+            let current = AITranslationSettings.contextMessageCount
+            let options = [5, 10, 20, 50, 100]
+            let nextIndex = (options.firstIndex(where: { $0 > current }) ?? 0)
+            AITranslationSettings.contextMessageCount = options[nextIndex]
         },
         toggleShowRaw: { value in
             AITranslationSettings.showRawAPIResponses = value
@@ -357,66 +364,36 @@ public func aiSettingsController(context: AccountContext) -> ViewController {
         }
     )
 
-    let signal = statePromise.get()
-    |> map { state -> ([AISettingsEntry], AISettingsState) in
-        var entries: [AISettingsEntry] = []
+    let presentationData = context.sharedContext.currentPresentationData.with { $0 }
 
-        entries.append(.connectionHeader("CONNECTION"))
-        entries.append(.proxyURL("Server URL", AITranslationSettings.proxyServerURL))
-        entries.append(.testConnection("Test Connection"))
-        entries.append(.connectionStatus("Status", state.isConnected))
-
-        entries.append(.translationHeader("TRANSLATION"))
-        entries.append(.globalToggle("Enable AI Translation", AITranslationSettings.enabled))
-        entries.append(.incomingToggle("Translate Incoming (DE→EN)", AITranslationSettings.autoTranslateIncoming))
-        entries.append(.outgoingToggle("Translate Outgoing (EN→DE)", AITranslationSettings.autoTranslateOutgoing))
-
-        entries.append(.devHeader("DEVELOPER SETTINGS"))
-        entries.append(.contextMode("Translation Context", AITranslationSettings.contextMode))
-        if AITranslationSettings.contextMode == 2 {
-            entries.append(.contextCount("Context Messages", AITranslationSettings.contextMessageCount))
-        }
-        entries.append(.showRawResponses("Show Raw API Responses", AITranslationSettings.showRawAPIResponses))
-
-        entries.append(.cacheHeader("CACHE"))
-        entries.append(.clearCache("Clear Translation Cache"))
-
-        return (entries, state)
+    let signal = combineLatest(
+        context.sharedContext.presentationData,
+        statePromise.get()
+    )
+    |> map { presentationData, state -> (ItemListControllerState, (ItemListNodeState, Any)) in
+        let entries = aiSettingsEntries(state: state)
+        let controllerState = ItemListControllerState(
+            presentationData: ItemListPresentationData(presentationData),
+            title: .text("AI Translation"),
+            leftNavigationButton: nil,
+            rightNavigationButton: nil,
+            backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back)
+        )
+        let listState = ItemListNodeState(
+            presentationData: ItemListPresentationData(presentationData),
+            entries: entries.map { $0 },
+            style: .blocks,
+            animateChanges: false
+        )
+        return (controllerState, (listState, arguments))
     }
 
     let controller = ItemListController(
-        context: context,
-        state: signal |> map { entries, _ in
-            return ItemListControllerState(
-                presentationData: ItemListPresentationData(context.sharedContext.currentPresentationData.with { $0 }),
-                title: .text("AI Translation"),
-                entries: entries.map { $0 },
-                style: .blocks
-            )
-        }
+        presentationData: ItemListPresentationData(presentationData),
+        updatedPresentationData: context.sharedContext.presentationData |> map { ItemListPresentationData($0) },
+        state: signal,
+        tabBarItem: nil
     )
 
     return controller
-}
-
-// MARK: - Helper for text input alerts
-
-private func textAlertController(
-    context: AccountContext,
-    title: String,
-    text: String,
-    actions: [TextAlertAction],
-    actionLayout: TextAlertContentActionLayout,
-    inputPlaceholder: String,
-    inputText: String
-) -> AlertController {
-    // Use Telegram's built-in text input alert
-    return textAlertController(
-        context: context,
-        forceTheme: nil,
-        title: title,
-        text: text,
-        actions: actions,
-        actionLayout: actionLayout
-    )
 }
