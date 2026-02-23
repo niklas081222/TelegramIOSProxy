@@ -6,13 +6,28 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 PATCHES_DIR="${PROJECT_DIR}/telegram-ios/patches"
 
-# macOS-compatible sed in-place (macOS sed requires -i '')
-sedi() {
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        sed -i '' "$@"
-    else
-        sed -i "$@"
-    fi
+# Insert a line after the first occurrence of a pattern in a file.
+# Uses Python for reliable cross-platform behavior (BSD sed's `a\` is buggy).
+insert_after() {
+    local file="$1"
+    local pattern="$2"
+    local new_line="$3"
+    python3 -c "
+import sys
+with open(sys.argv[1], 'r') as f:
+    lines = f.readlines()
+found = False
+result = []
+for line in lines:
+    result.append(line)
+    if not found and sys.argv[2] in line.rstrip():
+        result.append(sys.argv[3] + '\n')
+        found = True
+with open(sys.argv[1], 'w') as f:
+    f.writelines(result)
+if not found:
+    print(f'WARNING: pattern \"{sys.argv[2]}\" not found in {sys.argv[1]}')
+" "$file" "$pattern" "$new_line"
 }
 
 echo "Applying modifications to ${TARGET_DIR}..."
@@ -23,9 +38,7 @@ BUILD_FILE="${TARGET_DIR}/submodules/TelegramUI/BUILD"
 if grep -q "AITranslation" "$BUILD_FILE" 2>/dev/null; then
     echo "    Already present, skipping."
 else
-    # Add our module right after 'deps = ['
-    sedi '/deps = \[/a\
-        "//submodules/AITranslation:AITranslation",' "$BUILD_FILE"
+    insert_after "$BUILD_FILE" "deps = [" '        "//submodules/AITranslation:AITranslation",'
     echo "    Done."
 fi
 
@@ -35,12 +48,8 @@ APPDELEGATE="${TARGET_DIR}/submodules/TelegramUI/Sources/AppDelegate.swift"
 if grep -q "import AITranslation" "$APPDELEGATE" 2>/dev/null; then
     echo "    Already patched, skipping."
 else
-    # Add import after 'import UIKit'
-    sedi '/^import UIKit$/a\
-import AITranslation' "$APPDELEGATE"
-    # Add registration call after 'testIsLaunched = true'
-    sedi '/testIsLaunched = true$/a\
-        registerAITranslationService()' "$APPDELEGATE"
+    insert_after "$APPDELEGATE" "import UIKit" "import AITranslation"
+    insert_after "$APPDELEGATE" "testIsLaunched = true" "        registerAITranslationService()"
     echo "    Done."
 fi
 
@@ -50,9 +59,7 @@ CHAT_CTRL="${TARGET_DIR}/submodules/TelegramUI/Sources/ChatController.swift"
 if grep -q "import AITranslation" "$CHAT_CTRL" 2>/dev/null; then
     echo "    Already patched, skipping."
 else
-    # Add import at top (after import UIKit)
-    sedi '/^import UIKit$/a\
-import AITranslation' "$CHAT_CTRL"
+    insert_after "$CHAT_CTRL" "import UIKit" "import AITranslation"
 
     # Use Python for the more complex sendMessages modification
     python3 "${SCRIPT_DIR}/patch_chat_controller.py" "$CHAT_CTRL"
