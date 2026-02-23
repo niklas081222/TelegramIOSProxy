@@ -65,6 +65,23 @@ def create_missing_profiles(profiles_dir, telegram_build_path):
         print(f"[1] Created missing profile: {name}.mobileprovision")
 
 
+def extract_cert_der(p12_path):
+    """Extract the DER-encoded certificate from a .p12 file."""
+    # Extract PEM cert from p12
+    pem = subprocess.check_output([
+        "openssl", "pkcs12", "-in", p12_path,
+        "-clcerts", "-nokeys", "-passin", "pass:"
+    ])
+    # Convert PEM to DER
+    proc = subprocess.run(
+        ["openssl", "x509", "-outform", "der"],
+        input=pem, capture_output=True
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(f"Failed to convert cert to DER: {proc.stderr.decode()}")
+    return proc.stdout
+
+
 def setup_keychain(p12_path):
     """Create a temporary keychain and import the signing certificate."""
     keychain_name = "fake-codesigning-temp.keychain"
@@ -117,8 +134,8 @@ def setup_keychain(p12_path):
     return keychain_name, identity_name
 
 
-def fix_profiles(profiles_dir, keychain_name, identity_name):
-    """Fix expiration date and entitlements for all profiles."""
+def fix_profiles(profiles_dir, keychain_name, identity_name, signing_cert_der):
+    """Fix expiration date, entitlements, and DeveloperCertificates for all profiles."""
     new_expiration = datetime.datetime.now() + datetime.timedelta(days=3650)
     count = 0
 
@@ -164,6 +181,11 @@ def fix_profiles(profiles_dir, keychain_name, identity_name):
                 # Fix ApplicationIdentifierPrefix if present
                 if 'ApplicationIdentifierPrefix' in profile_dict:
                     profile_dict['ApplicationIdentifierPrefix'] = [TEAM_ID]
+
+        # Replace DeveloperCertificates with our self-signed cert so that
+        # rules_apple's process-and-sign can match the identity in the keychain
+        if signing_cert_der:
+            profile_dict['DeveloperCertificates'] = [signing_cert_der]
 
         # Write modified plist
         with tempfile.NamedTemporaryFile(suffix='.plist', delete=False) as tmp:
@@ -215,11 +237,15 @@ def main():
     # Step 1: Create any missing profiles
     create_missing_profiles(profiles_dir, telegram_build)
 
+    # Extract the DER-encoded signing certificate from the .p12
+    signing_cert_der = extract_cert_der(p12_path)
+    print(f"[1.5] Extracted signing cert ({len(signing_cert_der)} bytes)")
+
     # Step 2-3: Setup keychain and fix all profiles
     keychain_name = None
     try:
         keychain_name, identity_name = setup_keychain(p12_path)
-        fix_profiles(profiles_dir, keychain_name, identity_name)
+        fix_profiles(profiles_dir, keychain_name, identity_name, signing_cert_der)
     finally:
         if keychain_name:
             subprocess.run(["security", "delete-keychain", keychain_name], capture_output=True)
