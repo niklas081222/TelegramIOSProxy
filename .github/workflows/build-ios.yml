@@ -155,8 +155,10 @@ jobs:
           echo "=== Searching for build artifacts ==="
           mkdir -p artifacts
 
-          find telegram-ios-build -name "*.ipa" -exec cp {} artifacts/ \; 2>/dev/null || true
-          find telegram-ios-build/build -name "*.app" -maxdepth 3 -exec cp -r {} artifacts/ \; 2>/dev/null || true
+          # Bazel output is behind a symlink (bazel-bin), so copy directly
+          cp telegram-ios-build/bazel-bin/Telegram/Telegram.ipa artifacts/ 2>/dev/null || true
+          # Also search with symlink following as fallback
+          find -L telegram-ios-build -name "*.ipa" -exec cp {} artifacts/ \; 2>/dev/null || true
 
           echo ""
           echo "Artifacts found:"
