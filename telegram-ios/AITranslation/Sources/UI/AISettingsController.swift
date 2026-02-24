@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import Display
 import SwiftSignalKit
 import TelegramCore
@@ -292,17 +293,27 @@ public func aiSettingsController(context: AccountContext) -> ViewController {
 
     let arguments = AISettingsArguments(
         editProxyURL: {
-            // Show alert with current URL info
             let currentURL = AITranslationSettings.proxyServerURL
-            let alertController = textAlertController(
-                context: context,
+            let alert = UIAlertController(
                 title: "Proxy Server URL",
-                text: currentURL.isEmpty ? "Not configured. Set proxyServerURL in UserDefaults (ai_translation:proxy_url)." : "Current: \(currentURL)",
-                actions: [
-                    TextAlertAction(type: .defaultAction, title: "OK", action: {})
-                ]
+                message: "Enter your translation proxy URL (e.g. cloudflared tunnel URL)",
+                preferredStyle: .alert
             )
-            context.sharedContext.mainWindow?.present(alertController, on: .root)
+            alert.addTextField { textField in
+                textField.text = currentURL
+                textField.placeholder = "https://your-tunnel.trycloudflare.com"
+                textField.keyboardType = .URL
+                textField.autocapitalizationType = .none
+                textField.autocorrectionType = .no
+            }
+            alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+            alert.addAction(UIAlertAction(title: "Save", style: .default) { _ in
+                if let newURL = alert.textFields?.first?.text, !newURL.isEmpty {
+                    AITranslationSettings.proxyServerURL = newURL
+                    AITranslationService.shared.updateProxyClient()
+                }
+            })
+            context.sharedContext.mainWindow?.viewController?.present(alert, animated: true)
         },
         testConnection: {
             let _ = stateValue.modify { state in
