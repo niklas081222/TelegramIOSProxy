@@ -291,6 +291,8 @@ public func aiSettingsController(context: AccountContext) -> ViewController {
     let statePromise = ValuePromise(AISettingsState(), ignoreRepeated: true)
     let stateValue = Atomic(value: AISettingsState())
 
+    var presentControllerImpl: ((ViewController, ViewControllerPresentationArguments?) -> Void)?
+
     let arguments = AISettingsArguments(
         editProxyURL: {
             let currentURL = AITranslationSettings.proxyServerURL
@@ -313,7 +315,7 @@ public func aiSettingsController(context: AccountContext) -> ViewController {
                     AITranslationService.shared.updateProxyClient()
                 }
             })
-            context.sharedContext.mainWindow?.viewController?.present(alert, animated: true)
+            context.sharedContext.mainWindow?.presentNative(alert)
         },
         testConnection: {
             let _ = stateValue.modify { state in
@@ -348,7 +350,6 @@ public func aiSettingsController(context: AccountContext) -> ViewController {
             AITranslationSettings.contextMode = newMode
         },
         editContextCount: {
-            // Cycle through common values: 5, 10, 20, 50, 100
             let current = AITranslationSettings.contextMessageCount
             let options = [5, 10, 20, 50, 100]
             let nextIndex = (options.firstIndex(where: { $0 > current }) ?? 0)
@@ -360,7 +361,7 @@ public func aiSettingsController(context: AccountContext) -> ViewController {
         clearCache: {
             AITranslationService.shared.clearCache()
             let presentationData = context.sharedContext.currentPresentationData.with { $0 }
-            let controller = UndoOverlayController(
+            let undoController = UndoOverlayController(
                 presentationData: presentationData,
                 content: .info(
                     title: nil,
@@ -371,11 +372,9 @@ public func aiSettingsController(context: AccountContext) -> ViewController {
                 elevatedLayout: false,
                 action: { _ in return false }
             )
-            context.sharedContext.mainWindow?.present(controller, on: .root)
+            context.sharedContext.mainWindow?.present(undoController, on: .root)
         }
     )
-
-    let presentationData = context.sharedContext.currentPresentationData.with { $0 }
 
     let signal = combineLatest(
         context.sharedContext.presentationData,
@@ -399,12 +398,11 @@ public func aiSettingsController(context: AccountContext) -> ViewController {
         return (controllerState, (listState, arguments))
     }
 
-    let controller = ItemListController(
-        presentationData: ItemListPresentationData(presentationData),
-        updatedPresentationData: context.sharedContext.presentationData |> map { ItemListPresentationData($0) },
-        state: signal,
-        tabBarItem: nil
-    )
+    let controller = ItemListController(context: context, state: signal)
+
+    presentControllerImpl = { [weak controller] c, a in
+        controller?.present(c, in: .window(.root), with: a)
+    }
 
     return controller
 }
