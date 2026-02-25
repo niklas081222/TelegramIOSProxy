@@ -170,17 +170,21 @@ def fix_profiles(profiles_dir, keychain_name, identity_name, signing_cert_der):
             entitlements = profile_dict.get('Entitlements', {})
             old_app_id = entitlements.get('application-identifier', '')
 
-            if old_app_id != expected_app_id:
-                entitlements['application-identifier'] = expected_app_id
-                # Also fix keychain access groups if present
-                if 'keychain-access-groups' in entitlements:
-                    entitlements['keychain-access-groups'] = [expected_app_id]
-                profile_dict['Entitlements'] = entitlements
-                profile_dict['Name'] = expected_name
+            entitlements['application-identifier'] = expected_app_id
+            # Fix keychain access groups
+            entitlements['keychain-access-groups'] = [expected_app_id]
+            # Ensure app group entitlement is present (required for shared container)
+            app_group_id = f"group.{BUNDLE_ID}"
+            entitlements['com.apple.security.application-groups'] = [app_group_id]
+            # Ensure get-task-allow for debug/sideload
+            entitlements['get-task-allow'] = True
 
-                # Fix ApplicationIdentifierPrefix if present
-                if 'ApplicationIdentifierPrefix' in profile_dict:
-                    profile_dict['ApplicationIdentifierPrefix'] = [TEAM_ID]
+            profile_dict['Entitlements'] = entitlements
+            profile_dict['Name'] = expected_name
+
+            # Fix ApplicationIdentifierPrefix if present
+            if 'ApplicationIdentifierPrefix' in profile_dict:
+                profile_dict['ApplicationIdentifierPrefix'] = [TEAM_ID]
 
         # Replace DeveloperCertificates with our self-signed cert so that
         # rules_apple's process-and-sign can match the identity in the keychain
