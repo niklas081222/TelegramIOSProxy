@@ -114,6 +114,7 @@ def patch_bazelrc_action_env(build_dir):
         "DEVELOPER_DIR": developer_dir,
         "HOME": None,      # pass through from host
         "TMPDIR": None,     # pass through from host
+        "GOOGLE_APPLICATION_CREDENTIALS": None,  # pass through for GCS remote cache
     }
 
     lines_to_add = []
