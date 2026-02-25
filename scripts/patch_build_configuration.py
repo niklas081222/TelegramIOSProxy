@@ -140,6 +140,37 @@ def patch_bazelrc_action_env(build_dir):
     return True
 
 
+def patch_remote_downloader(build_dir):
+    """Remove --experimental_remote_downloader from Make.py.
+
+    Make.py adds --experimental_remote_downloader alongside --remote_cache,
+    but this flag only works with gRPC caching, not HTTP/GCS. When using
+    --cacheHost with an HTTPS URL, the downloader flag causes Bazel to error:
+    'The remote downloader can only be used in combination with gRPC caching'
+    """
+    make_path = os.path.join(build_dir, "build-system", "Make", "Make.py")
+
+    with open(make_path, "r") as f:
+        content = f.read()
+
+    original = content
+    # Remove lines that add --experimental_remote_downloader
+    content = re.sub(
+        r"\s*'--experimental_remote_downloader=\{}'.format\(self\.remote_cache\),?\n",
+        "\n",
+        content
+    )
+
+    if content != original:
+        with open(make_path, "w") as f:
+            f.write(content)
+        print(f"[4] Removed --experimental_remote_downloader from {make_path}")
+    else:
+        print(f"[4] No --experimental_remote_downloader found in {make_path}")
+
+    return True
+
+
 def main():
     if len(sys.argv) < 2:
         print("Usage: patch_build_configuration.py <telegram-ios-build-dir>")
@@ -154,6 +185,7 @@ def main():
     patch_copy_profiles(build_dir)
     patch_swift_copts(build_dir)
     patch_bazelrc_action_env(build_dir)
+    patch_remote_downloader(build_dir)
 
 
 if __name__ == "__main__":
