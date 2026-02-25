@@ -136,7 +136,7 @@ def _patch_with_wrapper_method(filepath: str, content: str) -> None:
             return
         }
 
-        guard AITranslationSettings.enabled && AITranslationSettings.autoTranslateOutgoing && AITranslationService.shared.isEnabledForChat(peerId) else {
+        guard AITranslationSettings.enabled && AITranslationSettings.autoTranslateOutgoing else {
             self.sendMessages(messages, media: media, postpone: postpone, commit: commit)
             return
         }

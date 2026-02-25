@@ -183,14 +183,26 @@ public final class AITranslationService {
     // MARK: - Private
 
     private func shouldTranslateOutgoing(chatId: PeerId) -> Bool {
-        return AITranslationSettings.enabled
-            && AITranslationSettings.autoTranslateOutgoing
-            && isEnabledForChat(chatId)
+        guard AITranslationSettings.enabled && AITranslationSettings.autoTranslateOutgoing else {
+            return false
+        }
+        // If per-chat list is empty, translate all chats (default behavior)
+        // If per-chat list has entries, only translate those specific chats
+        let perChatIds = AITranslationSettings.enabledChatIds
+        if perChatIds.isEmpty {
+            return true
+        }
+        return perChatIds.contains(chatId.id._internalGetInt64Value())
     }
 
     private func shouldTranslateIncoming(chatId: PeerId) -> Bool {
-        return AITranslationSettings.enabled
-            && AITranslationSettings.autoTranslateIncoming
-            && isEnabledForChat(chatId)
+        guard AITranslationSettings.enabled && AITranslationSettings.autoTranslateIncoming else {
+            return false
+        }
+        let perChatIds = AITranslationSettings.enabledChatIds
+        if perChatIds.isEmpty {
+            return true
+        }
+        return perChatIds.contains(chatId.id._internalGetInt64Value())
     }
 }

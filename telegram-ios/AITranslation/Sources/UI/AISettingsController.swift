@@ -74,8 +74,40 @@ private enum AISettingsEntry: ItemListNodeEntry {
         return lhs.stableId < rhs.stableId
     }
 
+    // Compare by stableId AND associated values so the list detects changes
     static func == (lhs: AISettingsEntry, rhs: AISettingsEntry) -> Bool {
-        return lhs.stableId == rhs.stableId
+        switch (lhs, rhs) {
+        case let (.connectionHeader(a), .connectionHeader(b)):
+            return a == b
+        case let (.proxyURL(a1, a2), .proxyURL(b1, b2)):
+            return a1 == b1 && a2 == b2
+        case let (.testConnection(a), .testConnection(b)):
+            return a == b
+        case let (.connectionStatus(a1, a2), .connectionStatus(b1, b2)):
+            return a1 == b1 && a2 == b2
+        case let (.translationHeader(a), .translationHeader(b)):
+            return a == b
+        case let (.globalToggle(a1, a2), .globalToggle(b1, b2)):
+            return a1 == b1 && a2 == b2
+        case let (.incomingToggle(a1, a2), .incomingToggle(b1, b2)):
+            return a1 == b1 && a2 == b2
+        case let (.outgoingToggle(a1, a2), .outgoingToggle(b1, b2)):
+            return a1 == b1 && a2 == b2
+        case let (.devHeader(a), .devHeader(b)):
+            return a == b
+        case let (.contextMode(a1, a2), .contextMode(b1, b2)):
+            return a1 == b1 && a2 == b2
+        case let (.contextCount(a1, a2), .contextCount(b1, b2)):
+            return a1 == b1 && a2 == b2
+        case let (.showRawResponses(a1, a2), .showRawResponses(b1, b2)):
+            return a1 == b1 && a2 == b2
+        case let (.cacheHeader(a), .cacheHeader(b)):
+            return a == b
+        case let (.clearCache(a), .clearCache(b)):
+            return a == b
+        default:
+            return false
+        }
     }
 
     func item(presentationData: ItemListPresentationData, arguments: Any) -> ListViewItem {
@@ -255,7 +287,6 @@ private final class AISettingsArguments {
 private struct AISettingsState: Equatable {
     var isConnected: Bool = false
     var isTesting: Bool = false
-    var revision: Int = 0
 }
 
 // MARK: - Entries generation
@@ -263,15 +294,21 @@ private struct AISettingsState: Equatable {
 private func aiSettingsEntries(state: AISettingsState) -> [AISettingsEntry] {
     var entries: [AISettingsEntry] = []
 
+    let isEnabled = AITranslationSettings.enabled
+
     entries.append(.connectionHeader("CONNECTION"))
     entries.append(.proxyURL("Server URL", AITranslationSettings.proxyServerURL))
     entries.append(.testConnection("Test Connection"))
     entries.append(.connectionStatus("Status", state.isConnected))
 
     entries.append(.translationHeader("TRANSLATION"))
-    entries.append(.globalToggle("Enable AI Translation", AITranslationSettings.enabled))
-    entries.append(.incomingToggle("Translate Incoming (DE > EN)", AITranslationSettings.autoTranslateIncoming))
-    entries.append(.outgoingToggle("Translate Outgoing (EN > DE)", AITranslationSettings.autoTranslateOutgoing))
+    entries.append(.globalToggle("Enable AI Translation", isEnabled))
+
+    // Only show directional toggles when global translation is enabled
+    if isEnabled {
+        entries.append(.incomingToggle("Translate Incoming (DE > EN)", AITranslationSettings.autoTranslateIncoming))
+        entries.append(.outgoingToggle("Translate Outgoing (EN > DE)", AITranslationSettings.autoTranslateOutgoing))
+    }
 
     entries.append(.devHeader("DEVELOPER SETTINGS"))
     entries.append(.contextMode("Translation Context", AITranslationSettings.contextMode))
@@ -291,6 +328,15 @@ private func aiSettingsEntries(state: AISettingsState) -> [AISettingsEntry] {
 public func aiSettingsController(context: AccountContext) -> ViewController {
     let statePromise = ValuePromise(AISettingsState(), ignoreRepeated: true)
     let stateValue = Atomic(value: AISettingsState())
+
+    // Use a separate trigger to force entry regeneration when settings change
+    let settingsRevision = ValuePromise<Int>(0, ignoreRepeated: false)
+    let settingsRevisionValue = Atomic<Int>(value: 0)
+
+    let bumpRevision: () -> Void = {
+        let _ = settingsRevisionValue.modify { $0 + 1 }
+        settingsRevision.set(settingsRevisionValue.with { $0 })
+    }
 
     var presentControllerImpl: ((ViewController, ViewControllerPresentationArguments?) -> Void)?
 
@@ -314,12 +360,7 @@ public func aiSettingsController(context: AccountContext) -> ViewController {
                 if let newURL = alert.textFields?.first?.text, !newURL.isEmpty {
                     AITranslationSettings.proxyServerURL = newURL
                     AITranslationService.shared.updateProxyClient()
-                    let _ = stateValue.modify { state in
-                        var state = state
-                        state.revision += 1
-                        return state
-                    }
-                    statePromise.set(stateValue.with { $0 })
+                    bumpRevision()
                 }
             })
             context.sharedContext.mainWindow?.presentNative(alert)
@@ -346,31 +387,31 @@ public func aiSettingsController(context: AccountContext) -> ViewController {
         toggleGlobal: { value in
             AITranslationSettings.enabled = value
             updateAITranslationServiceRegistration()
-            let _ = stateValue.modify { s in var s = s; s.revision += 1; return s }
-            statePromise.set(stateValue.with { $0 })
+            bumpRevision()
         },
         toggleIncoming: { value in
             AITranslationSettings.autoTranslateIncoming = value
+            bumpRevision()
         },
         toggleOutgoing: { value in
             AITranslationSettings.autoTranslateOutgoing = value
+            bumpRevision()
         },
         toggleContextMode: {
             let newMode = AITranslationSettings.contextMode == 1 ? 2 : 1
             AITranslationSettings.contextMode = newMode
-            let _ = stateValue.modify { s in var s = s; s.revision += 1; return s }
-            statePromise.set(stateValue.with { $0 })
+            bumpRevision()
         },
         editContextCount: {
             let current = AITranslationSettings.contextMessageCount
             let options = [5, 10, 20, 50, 100]
             let nextIndex = (options.firstIndex(where: { $0 > current }) ?? 0)
             AITranslationSettings.contextMessageCount = options[nextIndex]
-            let _ = stateValue.modify { s in var s = s; s.revision += 1; return s }
-            statePromise.set(stateValue.with { $0 })
+            bumpRevision()
         },
         toggleShowRaw: { value in
             AITranslationSettings.showRawAPIResponses = value
+            bumpRevision()
         },
         clearCache: {
             AITranslationService.shared.clearCache()
@@ -392,13 +433,14 @@ public func aiSettingsController(context: AccountContext) -> ViewController {
 
     let signal = combineLatest(
         context.sharedContext.presentationData,
-        statePromise.get()
+        statePromise.get(),
+        settingsRevision.get()
     )
-    |> map { presentationData, state -> (ItemListControllerState, (ItemListNodeState, Any)) in
+    |> map { presentationData, state, _ -> (ItemListControllerState, (ItemListNodeState, Any)) in
         let entries = aiSettingsEntries(state: state)
         let controllerState = ItemListControllerState(
             presentationData: ItemListPresentationData(presentationData),
-            title: .text("AI Translation"),
+            title: .text("Translation Proxy"),
             leftNavigationButton: nil,
             rightNavigationButton: nil,
             backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back)
@@ -407,7 +449,7 @@ public func aiSettingsController(context: AccountContext) -> ViewController {
             presentationData: ItemListPresentationData(presentationData),
             entries: entries.map { $0 },
             style: .blocks,
-            animateChanges: false
+            animateChanges: true
         )
         return (controllerState, (listState, arguments))
     }
