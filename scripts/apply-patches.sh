@@ -33,7 +33,7 @@ if not found:
 echo "Applying modifications to ${TARGET_DIR}..."
 
 # 1. Add AITranslation dependency to TelegramUI/BUILD
-echo "  [1/5] Adding AITranslation to TelegramUI/BUILD deps..."
+echo "  [1/6] Adding AITranslation to TelegramUI/BUILD deps..."
 BUILD_FILE="${TARGET_DIR}/submodules/TelegramUI/BUILD"
 if grep -q "AITranslation" "$BUILD_FILE" 2>/dev/null; then
     echo "    Already present, skipping."
@@ -43,7 +43,7 @@ else
 fi
 
 # 2. Add import + registration to AppDelegate.swift
-echo "  [2/5] Patching AppDelegate.swift..."
+echo "  [2/6] Patching AppDelegate.swift..."
 APPDELEGATE="${TARGET_DIR}/submodules/TelegramUI/Sources/AppDelegate.swift"
 if grep -q "import AITranslation" "$APPDELEGATE" 2>/dev/null; then
     echo "    Already patched, skipping."
@@ -54,7 +54,7 @@ else
 fi
 
 # 3. Patch ChatController.swift for outgoing message interception
-echo "  [3/5] Patching ChatController.swift..."
+echo "  [3/6] Patching ChatController.swift..."
 CHAT_CTRL="${TARGET_DIR}/submodules/TelegramUI/Sources/ChatController.swift"
 if grep -q "import AITranslation" "$CHAT_CTRL" 2>/dev/null; then
     echo "    Already patched, skipping."
@@ -66,8 +66,18 @@ else
     echo "    Done."
 fi
 
-# 4. Patch PeerInfoScreen to add Translation Proxy settings entry
-echo "  [4/5] Patching PeerInfoScreen for Translation Proxy settings..."
+# 4. Patch ChatControllerLoadDisplayNode.swift for main text input translation
+echo "  [4/6] Patching ChatControllerLoadDisplayNode.swift..."
+LOAD_DISPLAY_NODE="${TARGET_DIR}/submodules/TelegramUI/Sources/Chat/ChatControllerLoadDisplayNode.swift"
+if grep -q "import AITranslation" "$LOAD_DISPLAY_NODE" 2>/dev/null; then
+    echo "    Already patched, skipping."
+else
+    python3 "${SCRIPT_DIR}/patch_load_display_node.py" "$LOAD_DISPLAY_NODE"
+    echo "    Done."
+fi
+
+# 5. Patch PeerInfoScreen to add Translation Proxy settings entry
+echo "  [5/6] Patching PeerInfoScreen for Translation Proxy settings..."
 PEERINFO="${TARGET_DIR}/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoScreen.swift"
 if grep -q "import AITranslation" "$PEERINFO" 2>/dev/null; then
     echo "    Already patched, skipping."
@@ -76,8 +86,8 @@ else
     echo "    Done."
 fi
 
-# 5. Apply any additional .patch files
-echo "  [5/5] Applying additional patch files..."
+# 6. Apply any additional .patch files
+echo "  [6/6] Applying additional patch files..."
 PATCH_COUNT=0
 for patch_file in "${PATCHES_DIR}"/*.patch; do
     [ -f "$patch_file" ] || continue
