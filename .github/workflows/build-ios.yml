@@ -16,6 +16,8 @@ jobs:
     env:
       TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
       TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+      BUNDLE_ID: com.niklas.translategram
+      TEAM_ID: 5RPK5SFG6M
 
     steps:
       - name: Checkout repository
@@ -66,10 +68,10 @@ jobs:
           python3 -c "
           import json, pathlib
           cfg = {
-              'bundle_id': 'ph.telegra.Telegraph',
+              'bundle_id': '${BUNDLE_ID}',
               'api_id': '${API_ID}',
               'api_hash': '${API_HASH}',
-              'team_id': 'C67CF9S4VU',
+              'team_id': '${TEAM_ID}',
               'app_center_id': '0',
               'is_internal_build': 'true',
               'is_appstore_build': 'false',
@@ -85,50 +87,60 @@ jobs:
           echo "Build configuration written"
           cat telegram-ios-build/build-system/appstore-configuration.json
 
-      - name: Fix expired provisioning profiles
+      - name: Install provisioning profiles
         run: |
-          python3 scripts/fix_profile_expiration.py telegram-ios-build
+          PROFILES_DIR="telegram-ios-build/build-system/fake-codesigning/profiles"
+          mkdir -p "$PROFILES_DIR"
 
-      - name: Patch build system for CI
-        run: |
-          python3 scripts/patch_build_configuration.py telegram-ios-build
+          echo "${{ secrets.PROFILE_TELEGRAM }}" | base64 -d > "$PROFILES_DIR/Telegram.mobileprovision"
+          echo "${{ secrets.PROFILE_SHARE }}" | base64 -d > "$PROFILES_DIR/Share.mobileprovision"
+          echo "${{ secrets.PROFILE_WIDGET }}" | base64 -d > "$PROFILES_DIR/Widget.mobileprovision"
+          echo "${{ secrets.PROFILE_NOTIFICATIONCONTENT }}" | base64 -d > "$PROFILES_DIR/NotificationContent.mobileprovision"
+          echo "${{ secrets.PROFILE_NOTIFICATIONSERVICE }}" | base64 -d > "$PROFILES_DIR/NotificationService.mobileprovision"
+          echo "${{ secrets.PROFILE_INTENTS }}" | base64 -d > "$PROFILES_DIR/Intents.mobileprovision"
+          echo "${{ secrets.PROFILE_BROADCASTUPLOAD }}" | base64 -d > "$PROFILES_DIR/BroadcastUpload.mobileprovision"
+          echo "${{ secrets.PROFILE_WATCHAPP }}" | base64 -d > "$PROFILES_DIR/WatchApp.mobileprovision"
+          echo "${{ secrets.PROFILE_WATCHEXTENSION }}" | base64 -d > "$PROFILES_DIR/WatchExtension.mobileprovision"
+
+          echo "Installed $(ls "$PROFILES_DIR"/*.mobileprovision | wc -l) profiles"
+          ls -la "$PROFILES_DIR"
 
       - name: Setup signing keychain
         run: |
           KEYCHAIN="build.keychain"
           KEYCHAIN_PASSWORD="build_password_ci"
-          P12_PATH="telegram-ios-build/build-system/fake-codesigning/certs/SelfSigned.p12"
 
           # Create and configure keychain
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
           security set-keychain-settings "$KEYCHAIN"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
 
-          # Import the fake signing certificate
-          security import "$P12_PATH" -k "$KEYCHAIN" -P "" \
+          # Decode and import the real signing certificate
+          echo "${{ secrets.SIGNING_CERTIFICATE_P12 }}" | base64 -d > /tmp/signing.p12
+          security import /tmp/signing.p12 -k "$KEYCHAIN" \
+            -P "${{ secrets.SIGNING_CERTIFICATE_PASSWORD }}" \
             -T /usr/bin/codesign -T /usr/bin/security
+          rm -f /tmp/signing.p12
 
-          # Extract the certificate from .p12 and trust it for codesigning
-          # Self-signed certs aren't trusted by default, so codesign won't find them
-          openssl pkcs12 -in "$P12_PATH" -clcerts -nokeys -passin pass: \
-            | openssl x509 -outform der -out /tmp/signing-cert.cer
-          sudo security add-trusted-cert -d -r trustRoot -p codeSign \
-            -k "$KEYCHAIN" /tmp/signing-cert.cer
-          rm -f /tmp/signing-cert.cer
+          # Download and import Apple WWDR intermediate certificates
+          curl -sL "https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer" -o /tmp/AppleWWDRCAG3.cer
+          security import /tmp/AppleWWDRCAG3.cer -k "$KEYCHAIN" -T /usr/bin/codesign
+          rm -f /tmp/AppleWWDRCAG3.cer
 
-          # Add to search list (prepend to existing keychains)
+          # Add to search list
           EXISTING=$(security list-keychains -d user | tr -d '"' | tr '\n' ' ')
           security list-keychains -d user -s "$KEYCHAIN" $EXISTING
 
-          # Allow codesign to access the key without prompting
+          # Allow codesign to access without prompting
           security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
 
           # Verify
           echo "=== Signing identities ==="
           security find-identity -v -p codesigning "$KEYCHAIN"
-          echo ""
-          echo "=== All identities (including untrusted) ==="
-          security find-identity -p codesigning "$KEYCHAIN"
+
+      - name: Patch build system for CI
+        run: |
+          python3 scripts/patch_build_configuration.py telegram-ios-build
 
       - name: Build IPA
         working-directory: telegram-ios-build

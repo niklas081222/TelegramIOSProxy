@@ -31,8 +31,8 @@ PROFILE_SUFFIX_MAP = {
     'WatchExtension': '.watchkitapp.watchkitextension',
 }
 
-TEAM_ID = 'C67CF9S4VU'
-BUNDLE_ID = 'ph.telegra.Telegraph'
+TEAM_ID = '5RPK5SFG6M'
+BUNDLE_ID = 'com.niklas.translategram'
 
 
 def create_missing_profiles(profiles_dir, telegram_build_path):
