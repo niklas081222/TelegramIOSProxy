@@ -255,6 +255,7 @@ private final class AISettingsArguments {
 private struct AISettingsState: Equatable {
     var isConnected: Bool = false
     var isTesting: Bool = false
+    var revision: Int = 0
 }
 
 // MARK: - Entries generation
@@ -313,6 +314,12 @@ public func aiSettingsController(context: AccountContext) -> ViewController {
                 if let newURL = alert.textFields?.first?.text, !newURL.isEmpty {
                     AITranslationSettings.proxyServerURL = newURL
                     AITranslationService.shared.updateProxyClient()
+                    let _ = stateValue.modify { state in
+                        var state = state
+                        state.revision += 1
+                        return state
+                    }
+                    statePromise.set(stateValue.with { $0 })
                 }
             })
             context.sharedContext.mainWindow?.presentNative(alert)
@@ -338,6 +345,9 @@ public func aiSettingsController(context: AccountContext) -> ViewController {
         },
         toggleGlobal: { value in
             AITranslationSettings.enabled = value
+            updateAITranslationServiceRegistration()
+            let _ = stateValue.modify { s in var s = s; s.revision += 1; return s }
+            statePromise.set(stateValue.with { $0 })
         },
         toggleIncoming: { value in
             AITranslationSettings.autoTranslateIncoming = value
@@ -348,12 +358,16 @@ public func aiSettingsController(context: AccountContext) -> ViewController {
         toggleContextMode: {
             let newMode = AITranslationSettings.contextMode == 1 ? 2 : 1
             AITranslationSettings.contextMode = newMode
+            let _ = stateValue.modify { s in var s = s; s.revision += 1; return s }
+            statePromise.set(stateValue.with { $0 })
         },
         editContextCount: {
             let current = AITranslationSettings.contextMessageCount
             let options = [5, 10, 20, 50, 100]
             let nextIndex = (options.firstIndex(where: { $0 > current }) ?? 0)
             AITranslationSettings.contextMessageCount = options[nextIndex]
+            let _ = stateValue.modify { s in var s = s; s.revision += 1; return s }
+            statePromise.set(stateValue.with { $0 })
         },
         toggleShowRaw: { value in
             AITranslationSettings.showRawAPIResponses = value
