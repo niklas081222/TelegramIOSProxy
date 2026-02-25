@@ -142,6 +142,12 @@ jobs:
         run: |
           python3 scripts/patch_build_configuration.py telegram-ios-build
 
+      - name: Setup Bazel remote cache
+        run: |
+          echo '${{ secrets.GCS_SA_KEY }}' > /tmp/gcs-key.json
+          echo "GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcs-key.json" >> $GITHUB_ENV
+          echo "GCS cache configured for translategram-bazel-cache bucket"
+
       - name: Build IPA
         working-directory: telegram-ios-build
         run: |
@@ -151,8 +157,9 @@ jobs:
           python3 --version
           echo ""
 
-          echo "=== Starting build ==="
+          echo "=== Starting build (with GCS remote cache) ==="
           python3 build-system/Make/Make.py \
+            --cacheHost=https://storage.googleapis.com/translategram-bazel-cache \
             build \
             --configurationPath=build-system/appstore-configuration.json \
             --codesigningInformationPath=build-system/fake-codesigning \
@@ -164,6 +171,7 @@ jobs:
       - name: Find and collect artifacts
         if: always()
         run: |
+          rm -f /tmp/gcs-key.json
           echo "=== Searching for build artifacts ==="
           mkdir -p artifacts
 
