@@ -157,6 +157,72 @@ public final class AIProxyClient {
         }
     }
 
+    // MARK: - System Prompt
+
+    public func getPrompt() -> Signal<String, NoError> {
+        guard let url = URL(string: "\(baseURL)/prompt") else {
+            return .single("")
+        }
+
+        return Signal { subscriber in
+            let task = self.session.dataTask(with: url) { data, _, error in
+                if let _ = error {
+                    subscriber.putNext("")
+                    subscriber.putCompletion()
+                    return
+                }
+                guard let data = data,
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let prompt = json["prompt"] as? String else {
+                    subscriber.putNext("")
+                    subscriber.putCompletion()
+                    return
+                }
+                subscriber.putNext(prompt)
+                subscriber.putCompletion()
+            }
+            task.resume()
+            return ActionDisposable { task.cancel() }
+        }
+    }
+
+    public func setPrompt(_ prompt: String) -> Signal<Bool, NoError> {
+        guard let url = URL(string: "\(baseURL)/prompt") else {
+            return .single(false)
+        }
+
+        return Signal { subscriber in
+            var urlRequest = URLRequest(url: url)
+            urlRequest.httpMethod = "POST"
+            urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+            let body: [String: String] = ["prompt": prompt]
+            guard let httpBody = try? JSONSerialization.data(withJSONObject: body) else {
+                subscriber.putNext(false)
+                subscriber.putCompletion()
+                return EmptyDisposable
+            }
+            urlRequest.httpBody = httpBody
+
+            let task = self.session.dataTask(with: urlRequest) { data, response, error in
+                if let _ = error {
+                    subscriber.putNext(false)
+                    subscriber.putCompletion()
+                    return
+                }
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    subscriber.putNext(false)
+                    subscriber.putCompletion()
+                    return
+                }
+                subscriber.putNext(httpResponse.statusCode == 200)
+                subscriber.putCompletion()
+            }
+            task.resume()
+            return ActionDisposable { task.cancel() }
+        }
+    }
+
     // MARK: - Health Check
 
     public func healthCheck() -> Signal<Bool, NoError> {

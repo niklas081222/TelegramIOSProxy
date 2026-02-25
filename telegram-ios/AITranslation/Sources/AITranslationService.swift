@@ -171,6 +171,22 @@ public final class AITranslationService {
         cache.clear()
     }
 
+    // MARK: - System Prompt
+
+    public func getPrompt() -> Signal<String, NoError> {
+        guard let client = proxyClient else {
+            return .single("")
+        }
+        return client.getPrompt()
+    }
+
+    public func setPrompt(_ prompt: String) -> Signal<Bool, NoError> {
+        guard let client = proxyClient else {
+            return .single(false)
+        }
+        return client.setPrompt(prompt)
+    }
+
     // MARK: - Connection Test
 
     public func testConnection() -> Signal<Bool, NoError> {

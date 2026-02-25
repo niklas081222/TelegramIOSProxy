@@ -356,6 +356,26 @@ async def health():
     }
 
 
+class PromptUpdate(BaseModel):
+    prompt: str
+
+
+@app.get("/prompt")
+async def get_prompt():
+    try:
+        content = SYSTEM_PROMPT_PATH.read_text()
+    except FileNotFoundError:
+        content = ""
+    return {"prompt": content}
+
+
+@app.post("/prompt")
+async def set_prompt(update: PromptUpdate):
+    SYSTEM_PROMPT_PATH.write_text(update.prompt)
+    logger.info(f"System prompt updated ({len(update.prompt)} chars)")
+    return {"status": "ok", "length": len(update.prompt)}
+
+
 @app.get("/stats")
 async def stats():
     s = translation_service.stats

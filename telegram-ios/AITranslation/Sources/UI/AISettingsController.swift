@@ -17,6 +17,7 @@ private enum AISettingsSection: Int32 {
     case translation = 1
     case devSettings = 2
     case cache = 3
+    case prompt = 4
 }
 
 private enum AISettingsEntry: ItemListNodeEntry {
@@ -38,6 +39,9 @@ private enum AISettingsEntry: ItemListNodeEntry {
     case cacheHeader(String)
     case clearCache(String)
 
+    case promptHeader(String)
+    case promptButton(String)
+
     var section: ItemListSectionId {
         switch self {
         case .connectionHeader, .proxyURL, .testConnection, .connectionStatus:
@@ -48,6 +52,8 @@ private enum AISettingsEntry: ItemListNodeEntry {
             return AISettingsSection.devSettings.rawValue
         case .cacheHeader, .clearCache:
             return AISettingsSection.cache.rawValue
+        case .promptHeader, .promptButton:
+            return AISettingsSection.prompt.rawValue
         }
     }
 
@@ -67,6 +73,8 @@ private enum AISettingsEntry: ItemListNodeEntry {
         case .showRawResponses: return 23
         case .cacheHeader: return 30
         case .clearCache: return 31
+        case .promptHeader: return 40
+        case .promptButton: return 41
         }
     }
 
@@ -104,6 +112,10 @@ private enum AISettingsEntry: ItemListNodeEntry {
         case let (.cacheHeader(a), .cacheHeader(b)):
             return a == b
         case let (.clearCache(a), .clearCache(b)):
+            return a == b
+        case let (.promptHeader(a), .promptHeader(b)):
+            return a == b
+        case let (.promptButton(a), .promptButton(b)):
             return a == b
         default:
             return false
@@ -242,6 +254,24 @@ private enum AISettingsEntry: ItemListNodeEntry {
                 style: .blocks,
                 action: { arguments.clearCache() }
             )
+
+        case let .promptHeader(text):
+            return ItemListSectionHeaderItem(
+                presentationData: presentationData,
+                text: text,
+                sectionId: self.section
+            )
+
+        case let .promptButton(title):
+            return ItemListActionItem(
+                presentationData: presentationData,
+                title: title,
+                kind: .generic,
+                alignment: .natural,
+                sectionId: self.section,
+                style: .blocks,
+                action: { arguments.openPromptEditor() }
+            )
         }
     }
 }
@@ -258,6 +288,7 @@ private final class AISettingsArguments {
     let editContextCount: () -> Void
     let toggleShowRaw: (Bool) -> Void
     let clearCache: () -> Void
+    let openPromptEditor: () -> Void
 
     init(
         editProxyURL: @escaping () -> Void,
@@ -268,7 +299,8 @@ private final class AISettingsArguments {
         toggleContextMode: @escaping () -> Void,
         editContextCount: @escaping () -> Void,
         toggleShowRaw: @escaping (Bool) -> Void,
-        clearCache: @escaping () -> Void
+        clearCache: @escaping () -> Void,
+        openPromptEditor: @escaping () -> Void
     ) {
         self.editProxyURL = editProxyURL
         self.testConnection = testConnection
@@ -279,6 +311,7 @@ private final class AISettingsArguments {
         self.editContextCount = editContextCount
         self.toggleShowRaw = toggleShowRaw
         self.clearCache = clearCache
+        self.openPromptEditor = openPromptEditor
     }
 }
 
@@ -320,6 +353,9 @@ private func aiSettingsEntries(state: AISettingsState) -> [AISettingsEntry] {
     entries.append(.cacheHeader("CACHE"))
     entries.append(.clearCache("Clear Translation Cache"))
 
+    entries.append(.promptHeader("SYSTEM PROMPT"))
+    entries.append(.promptButton("Edit Prompt"))
+
     return entries
 }
 
@@ -339,6 +375,7 @@ public func aiSettingsController(context: AccountContext) -> ViewController {
     }
 
     var presentControllerImpl: ((ViewController, ViewControllerPresentationArguments?) -> Void)?
+    var pushControllerImpl: ((ViewController) -> Void)?
 
     let arguments = AISettingsArguments(
         editProxyURL: {
@@ -428,6 +465,34 @@ public func aiSettingsController(context: AccountContext) -> ViewController {
                 action: { _ in return false }
             )
             context.sharedContext.mainWindow?.present(undoController, on: .root)
+        },
+        openPromptEditor: {
+            let alert = UIAlertController(
+                title: "Enter Password",
+                message: "Enter the 4-digit PIN to access prompt settings",
+                preferredStyle: .alert
+            )
+            alert.addTextField { textField in
+                textField.isSecureTextEntry = true
+                textField.keyboardType = .numberPad
+                textField.placeholder = "PIN"
+            }
+            alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+            alert.addAction(UIAlertAction(title: "OK", style: .default) { _ in
+                guard let pin = alert.textFields?.first?.text, pin == "4960" else {
+                    let errorAlert = UIAlertController(
+                        title: "Incorrect PIN",
+                        message: nil,
+                        preferredStyle: .alert
+                    )
+                    errorAlert.addAction(UIAlertAction(title: "OK", style: .default))
+                    context.sharedContext.mainWindow?.presentNative(errorAlert)
+                    return
+                }
+                let promptController = aiPromptEditorController(context: context)
+                pushControllerImpl?(promptController)
+            })
+            context.sharedContext.mainWindow?.presentNative(alert)
         }
     )
 
@@ -458,6 +523,10 @@ public func aiSettingsController(context: AccountContext) -> ViewController {
 
     presentControllerImpl = { [weak controller] c, a in
         controller?.present(c, in: .window(.root), with: a)
+    }
+
+    pushControllerImpl = { [weak controller] c in
+        (controller?.navigationController as? NavigationController)?.pushViewController(c)
     }
 
     return controller
