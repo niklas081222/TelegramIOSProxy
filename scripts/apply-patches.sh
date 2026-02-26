@@ -33,7 +33,7 @@ if not found:
 echo "Applying modifications to ${TARGET_DIR}..."
 
 # 1. Add AITranslation dependency to TelegramUI/BUILD
-echo "  [1/8] Adding AITranslation to TelegramUI/BUILD deps..."
+echo "  [1/10] Adding AITranslation to TelegramUI/BUILD deps..."
 BUILD_FILE="${TARGET_DIR}/submodules/TelegramUI/BUILD"
 if grep -q "AITranslation" "$BUILD_FILE" 2>/dev/null; then
     echo "    Already present, skipping."
@@ -43,7 +43,7 @@ else
 fi
 
 # 2. Add import + registration to AppDelegate.swift
-echo "  [2/8] Patching AppDelegate.swift..."
+echo "  [2/10] Patching AppDelegate.swift..."
 APPDELEGATE="${TARGET_DIR}/submodules/TelegramUI/Sources/AppDelegate.swift"
 if grep -q "import AITranslation" "$APPDELEGATE" 2>/dev/null; then
     echo "    Already patched, skipping."
@@ -54,7 +54,7 @@ else
 fi
 
 # 3. Patch ChatController.swift for outgoing message interception
-echo "  [3/8] Patching ChatController.swift..."
+echo "  [3/10] Patching ChatController.swift..."
 CHAT_CTRL="${TARGET_DIR}/submodules/TelegramUI/Sources/ChatController.swift"
 if grep -q "import AITranslation" "$CHAT_CTRL" 2>/dev/null; then
     echo "    Already patched, skipping."
@@ -67,7 +67,7 @@ else
 fi
 
 # 4. Patch ChatControllerLoadDisplayNode.swift for main text input translation
-echo "  [4/8] Patching ChatControllerLoadDisplayNode.swift..."
+echo "  [4/10] Patching ChatControllerLoadDisplayNode.swift..."
 LOAD_DISPLAY_NODE="${TARGET_DIR}/submodules/TelegramUI/Sources/Chat/ChatControllerLoadDisplayNode.swift"
 if grep -q "import AITranslation" "$LOAD_DISPLAY_NODE" 2>/dev/null; then
     echo "    Already patched, skipping."
@@ -77,7 +77,7 @@ else
 fi
 
 # 5. Patch ChatHistoryListNode.swift for incoming translation
-echo "  [5/8] Patching ChatHistoryListNode.swift for incoming translation..."
+echo "  [5/10] Patching ChatHistoryListNode.swift for incoming translation..."
 HISTORY_LIST_NODE="${TARGET_DIR}/submodules/TelegramUI/Sources/ChatHistoryListNode.swift"
 if grep -q "AI Translation: force-enable incoming" "$HISTORY_LIST_NODE" 2>/dev/null; then
     echo "    Already patched, skipping."
@@ -87,7 +87,7 @@ else
 fi
 
 # 6. Patch PeerInfoScreen to add Translation Proxy settings entry
-echo "  [6/8] Patching PeerInfoScreen for Translation Proxy settings..."
+echo "  [6/10] Patching PeerInfoScreen for Translation Proxy settings..."
 PEERINFO="${TARGET_DIR}/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoScreen.swift"
 if grep -q "import AITranslation" "$PEERINFO" 2>/dev/null; then
     echo "    Already patched, skipping."
@@ -97,7 +97,7 @@ else
 fi
 
 # 7. Patch Translate.swift to always use our translation service
-echo "  [7/8] Patching Translate.swift for AI translation service..."
+echo "  [7/10] Patching Translate.swift for AI translation service..."
 TRANSLATE_SWIFT="${TARGET_DIR}/submodules/TelegramCore/Sources/TelegramEngine/Messages/Translate.swift"
 if ! grep -q "enableLocalIfPossible" "$TRANSLATE_SWIFT" 2>/dev/null; then
     echo "    Already patched, skipping."
@@ -106,8 +106,28 @@ else
     echo "    Done."
 fi
 
-# 8. Apply any additional .patch files
-echo "  [8/8] Applying additional patch files..."
+# 8. Patch ChatMessageTextBubbleContentNode.swift for outgoing translation display
+echo "  [8/10] Patching ChatMessageTextBubbleContentNode.swift..."
+TEXT_BUBBLE="${TARGET_DIR}/submodules/TelegramUI/Components/Chat/ChatMessageTextBubbleContentNode/Sources/ChatMessageTextBubbleContentNode.swift"
+if grep -q "AI Translation: removed incoming guard" "$TEXT_BUBBLE" 2>/dev/null; then
+    echo "    Already patched, skipping."
+else
+    python3 "${SCRIPT_DIR}/patch_text_bubble.py" "$TEXT_BUBBLE"
+    echo "    Done."
+fi
+
+# 9. Patch ChatListItemStrings.swift for translated chat list preview
+echo "  [9/10] Patching ChatListItemStrings.swift..."
+CHAT_LIST_STRINGS="${TARGET_DIR}/submodules/ChatListUI/Sources/Node/ChatListItemStrings.swift"
+if grep -q "TranslationMessageAttribute" "$CHAT_LIST_STRINGS" 2>/dev/null; then
+    echo "    Already patched, skipping."
+else
+    python3 "${SCRIPT_DIR}/patch_chat_list_strings.py" "$CHAT_LIST_STRINGS"
+    echo "    Done."
+fi
+
+# 10. Apply any additional .patch files
+echo "  [10/10] Applying additional patch files..."
 PATCH_COUNT=0
 for patch_file in "${PATCHES_DIR}"/*.patch; do
     [ -f "$patch_file" ] || continue

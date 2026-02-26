@@ -51,42 +51,28 @@ def patch_load_display_node(filepath: str) -> None:
         indent = "                        "
 
     new_code = f"""{indent}// AI Translation: translate text messages before enqueuing
-{indent}var aiOriginalTexts: [Int: String] = [:]
-{indent}let aiTranslateSignals: [Signal<EnqueueMessage, NoError>] = transformedMessages.enumerated().map {{ indexAndMsg in
-{indent}    let index = indexAndMsg.offset
-{indent}    let message = indexAndMsg.element
+{indent}// German text goes as message.text (sent to server), English original stored
+{indent}// in TranslationMessageAttribute (for local display only).
+{indent}let aiTranslateSignals: [Signal<EnqueueMessage, NoError>] = transformedMessages.map {{ message in
 {indent}    switch message {{
 {indent}    case let .message(text, attributes, inlineStickers, mediaReference, threadId, replyToMessageId, replyToStoryId, localGroupingKey, correlationId, bubbleUpEmojiOrStickersets):
 {indent}        guard !text.isEmpty, AITranslationSettings.enabled, AITranslationSettings.autoTranslateOutgoing else {{
 {indent}            return .single(message)
 {indent}        }}
-{indent}        aiOriginalTexts[index] = text
+{indent}        let originalText = text
 {indent}        return AITranslationService.shared.translateOutgoing(text: text, chatId: peerId, context: strongSelf.context)
 {indent}        |> map {{ translatedText -> EnqueueMessage in
-{indent}            return .message(text: translatedText, attributes: attributes, inlineStickers: inlineStickers, mediaReference: mediaReference, threadId: threadId, replyToMessageId: replyToMessageId, replyToStoryId: replyToStoryId, localGroupingKey: localGroupingKey, correlationId: correlationId, bubbleUpEmojiOrStickersets: bubbleUpEmojiOrStickersets)
+{indent}            var newAttributes = attributes
+{indent}            newAttributes.append(TranslationMessageAttribute(text: originalText, entities: [], toLang: "en"))
+{indent}            return .message(text: translatedText, attributes: newAttributes, inlineStickers: inlineStickers, mediaReference: mediaReference, threadId: threadId, replyToMessageId: replyToMessageId, replyToStoryId: replyToStoryId, localGroupingKey: localGroupingKey, correlationId: correlationId, bubbleUpEmojiOrStickersets: bubbleUpEmojiOrStickersets)
 {indent}        }}
 {indent}    case .forward:
 {indent}        return .single(message)
 {indent}    }}
 {indent}}}
-{indent}let aiPostbox = strongSelf.context.account.postbox
 {indent}signal = combineLatest(aiTranslateSignals)
 {indent}|> mapToSignal {{ translatedMessages -> Signal<[MessageId?], NoError> in
 {indent}    return enqueueMessages(account: strongSelf.context.account, peerId: peerId, messages: translatedMessages)
-{indent}}}
-{indent}|> mapToSignal {{ messageIds -> Signal<[MessageId?], NoError> in
-{indent}    let originals = aiOriginalTexts
-{indent}    guard !originals.isEmpty else {{ return .single(messageIds) }}
-{indent}    return aiPostbox.transaction {{ transaction -> Void in
-{indent}        for (index, maybeId) in messageIds.enumerated() {{
-{indent}            guard let msgId = maybeId, let original = originals[index] else {{ continue }}
-{indent}            transaction.updateMessage(msgId, update: {{ currentMessage in
-{indent}                let storeForwardInfo = currentMessage.forwardInfo.flatMap(StoreMessageForwardInfo.init)
-{indent}                return .update(StoreMessage(id: currentMessage.id, globallyUniqueId: currentMessage.globallyUniqueId, groupingKey: currentMessage.groupingKey, threadId: currentMessage.threadId, timestamp: currentMessage.timestamp, flags: StoreMessageFlags(currentMessage.flags), tags: currentMessage.tags, globalTags: currentMessage.globalTags, localTags: currentMessage.localTags, forwardInfo: storeForwardInfo, authorId: currentMessage.author?.id, text: original, attributes: currentMessage.attributes, media: currentMessage.media))
-{indent}            }})
-{indent}        }}
-{indent}    }}
-{indent}    |> map {{ _ -> [MessageId?] in return messageIds }}
 {indent}}}"""
 
     content = content.replace(old_line, new_code, 1)
