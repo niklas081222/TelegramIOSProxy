@@ -33,7 +33,7 @@ if not found:
 echo "Applying modifications to ${TARGET_DIR}..."
 
 # 1. Add AITranslation dependency to TelegramUI/BUILD
-echo "  [1/6] Adding AITranslation to TelegramUI/BUILD deps..."
+echo "  [1/8] Adding AITranslation to TelegramUI/BUILD deps..."
 BUILD_FILE="${TARGET_DIR}/submodules/TelegramUI/BUILD"
 if grep -q "AITranslation" "$BUILD_FILE" 2>/dev/null; then
     echo "    Already present, skipping."
@@ -43,7 +43,7 @@ else
 fi
 
 # 2. Add import + registration to AppDelegate.swift
-echo "  [2/6] Patching AppDelegate.swift..."
+echo "  [2/8] Patching AppDelegate.swift..."
 APPDELEGATE="${TARGET_DIR}/submodules/TelegramUI/Sources/AppDelegate.swift"
 if grep -q "import AITranslation" "$APPDELEGATE" 2>/dev/null; then
     echo "    Already patched, skipping."
@@ -54,7 +54,7 @@ else
 fi
 
 # 3. Patch ChatController.swift for outgoing message interception
-echo "  [3/6] Patching ChatController.swift..."
+echo "  [3/8] Patching ChatController.swift..."
 CHAT_CTRL="${TARGET_DIR}/submodules/TelegramUI/Sources/ChatController.swift"
 if grep -q "import AITranslation" "$CHAT_CTRL" 2>/dev/null; then
     echo "    Already patched, skipping."
@@ -67,7 +67,7 @@ else
 fi
 
 # 4. Patch ChatControllerLoadDisplayNode.swift for main text input translation
-echo "  [4/6] Patching ChatControllerLoadDisplayNode.swift..."
+echo "  [4/8] Patching ChatControllerLoadDisplayNode.swift..."
 LOAD_DISPLAY_NODE="${TARGET_DIR}/submodules/TelegramUI/Sources/Chat/ChatControllerLoadDisplayNode.swift"
 if grep -q "import AITranslation" "$LOAD_DISPLAY_NODE" 2>/dev/null; then
     echo "    Already patched, skipping."
@@ -77,7 +77,7 @@ else
 fi
 
 # 5. Patch ChatControllerLoadDisplayNode.swift for auto incoming translation
-echo "  [5/7] Patching ChatControllerLoadDisplayNode.swift for incoming translation..."
+echo "  [5/8] Patching ChatControllerLoadDisplayNode.swift for incoming translation..."
 if grep -q "AI Translation: auto-enable incoming" "$LOAD_DISPLAY_NODE" 2>/dev/null; then
     echo "    Already patched, skipping."
 else
@@ -86,7 +86,7 @@ else
 fi
 
 # 6. Patch PeerInfoScreen to add Translation Proxy settings entry
-echo "  [6/7] Patching PeerInfoScreen for Translation Proxy settings..."
+echo "  [6/8] Patching PeerInfoScreen for Translation Proxy settings..."
 PEERINFO="${TARGET_DIR}/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoScreen.swift"
 if grep -q "import AITranslation" "$PEERINFO" 2>/dev/null; then
     echo "    Already patched, skipping."
@@ -95,8 +95,18 @@ else
     echo "    Done."
 fi
 
-# 7. Apply any additional .patch files
-echo "  [7/7] Applying additional patch files..."
+# 7. Patch Translate.swift to always use our translation service
+echo "  [7/8] Patching Translate.swift for AI translation service..."
+TRANSLATE_SWIFT="${TARGET_DIR}/submodules/TelegramCore/Sources/TelegramEngine/Messages/Translate.swift"
+if ! grep -q "enableLocalIfPossible" "$TRANSLATE_SWIFT" 2>/dev/null; then
+    echo "    Already patched, skipping."
+else
+    python3 "${SCRIPT_DIR}/patch_translate_engine.py" "$TRANSLATE_SWIFT"
+    echo "    Done."
+fi
+
+# 8. Apply any additional .patch files
+echo "  [8/8] Applying additional patch files..."
 PATCH_COUNT=0
 for patch_file in "${PATCHES_DIR}"/*.patch; do
     [ -f "$patch_file" ] || continue

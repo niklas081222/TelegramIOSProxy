@@ -117,6 +117,7 @@ private final class AIPromptEditorViewController: ViewController {
 
         self.navigationItem.rightBarButtonItem?.isEnabled = false
 
+        self.disposable?.dispose()
         self.disposable = (AITranslationService.shared.setPrompt(text, direction: self.direction)
         |> deliverOnMainQueue).startStrict(next: { [weak self] success in
             guard let self = self else { return }

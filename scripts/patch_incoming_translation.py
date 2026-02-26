@@ -33,6 +33,16 @@ def patch_incoming_translation(filepath: str) -> None:
                     presentationInterfaceState = presentationInterfaceState.updatedTranslationState(
                         ChatPresentationTranslationState(isEnabled: true, fromLang: "de", toLang: "en")
                     )
+                    // Async dispatch to ensure the translation pipeline is triggered
+                    // Setting state during content data observation doesn't fire presentationInterfaceStateUpdated
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self else { return }
+                        self.updateChatPresentationInterfaceState(interactive: false) { state in
+                            return state.updatedTranslationState(
+                                ChatPresentationTranslationState(isEnabled: true, fromLang: "de", toLang: "en")
+                            )
+                        }
+                    }
                 }
             }"""
 

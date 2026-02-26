@@ -24,9 +24,7 @@ public final class AIExperimentalTranslationService: ExperimentalInternalTransla
 
 /// Call this during app initialization to register the AI translation service.
 public func registerAITranslationService() {
-    if AITranslationSettings.enabled {
-        engineExperimentalInternalTranslationService = AIExperimentalTranslationService()
-    }
+    engineExperimentalInternalTranslationService = AIExperimentalTranslationService()
 }
 
 /// Call this when the global toggle changes to enable/disable the service.
