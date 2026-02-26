@@ -86,7 +86,7 @@ def patch_load_display_node(filepath: str) -> None:
 {indent}                        if let info = currentMessage.forwardInfo {{
 {indent}                            storeForwardInfo = StoreMessageForwardInfo(authorId: info.author?.id, sourceId: info.source?.id, sourceMessageId: info.sourceMessageId, date: info.date, authorSignature: info.authorSignature, psaType: info.psaType, flags: info.flags)
 {indent}                        }}
-{indent}                        return .update(StoreMessage(id: currentMessage.id, customStableId: nil, globallyUniqueId: currentMessage.globallyUniqueId, groupingKey: currentMessage.groupingKey, threadId: currentMessage.threadId, timestamp: currentMessage.timestamp, flags: StoreMessageFlags(rawValue: currentMessage.flags.rawValue), tags: currentMessage.tags, globalTags: currentMessage.globalTags, localTags: currentMessage.localTags, forwardInfo: storeForwardInfo, authorId: currentMessage.author?.id, text: original, attributes: currentMessage.attributes, media: currentMessage.media))
+{indent}                        return .update(StoreMessage(peerId: currentMessage.id.peerId, namespace: currentMessage.id.namespace, globallyUniqueId: currentMessage.globallyUniqueId, groupingKey: currentMessage.groupingKey, threadId: currentMessage.threadId, timestamp: currentMessage.timestamp, flags: StoreMessageFlags(rawValue: currentMessage.flags.rawValue), tags: currentMessage.tags, globalTags: currentMessage.globalTags, localTags: currentMessage.localTags, forwardInfo: storeForwardInfo, authorId: currentMessage.author?.id, text: original, attributes: currentMessage.attributes, media: currentMessage.media))
 {indent}                    }})
 {indent}                }}
 {indent}            }}).start()
