@@ -135,7 +135,8 @@ public final class AITranslationService {
                     dict[key] = result.translationFailed ? texts[key] ?? result.originalText : result.translatedText
                 }
             }
-            return dict
+            // If mapping failed and dict is empty, return originals as fallback
+            return dict.isEmpty && !texts.isEmpty ? texts : dict
         }
     }
 

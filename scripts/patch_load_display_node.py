@@ -50,30 +50,27 @@ def patch_load_display_node(filepath: str) -> None:
     else:
         indent = "                        "
 
-    new_code = f"""{indent}// AI Translation: translate text messages before enqueuing
-{indent}// German text goes as message.text (sent to server), English original stored
-{indent}// in TranslationMessageAttribute (for local display only).
-{indent}let aiTranslateSignals: [Signal<EnqueueMessage, NoError>] = transformedMessages.map {{ message in
-{indent}    switch message {{
+    new_code = f"""{indent}// AI Translation: fire-and-forget translate + enqueue for each message.
+{indent}// Text input clears instantly; translation runs in background.
+{indent}for aiMsg in transformedMessages {{
+{indent}    switch aiMsg {{
 {indent}    case let .message(text, attributes, inlineStickers, mediaReference, threadId, replyToMessageId, replyToStoryId, localGroupingKey, correlationId, bubbleUpEmojiOrStickersets):
-{indent}        guard !text.isEmpty, AITranslationSettings.enabled, AITranslationSettings.autoTranslateOutgoing else {{
-{indent}            return .single(message)
-{indent}        }}
-{indent}        let originalText = text
-{indent}        return AITranslationService.shared.translateOutgoing(text: text, chatId: peerId, context: strongSelf.context)
-{indent}        |> map {{ translatedText -> EnqueueMessage in
-{indent}            var newAttributes = attributes
-{indent}            newAttributes.append(TranslationMessageAttribute(text: originalText, entities: [], toLang: "en"))
-{indent}            return .message(text: translatedText, attributes: newAttributes, inlineStickers: inlineStickers, mediaReference: mediaReference, threadId: threadId, replyToMessageId: replyToMessageId, replyToStoryId: replyToStoryId, localGroupingKey: localGroupingKey, correlationId: correlationId, bubbleUpEmojiOrStickersets: bubbleUpEmojiOrStickersets)
+{indent}        if !text.isEmpty && AITranslationSettings.enabled && AITranslationSettings.autoTranslateOutgoing {{
+{indent}            let originalText = text
+{indent}            let _ = (AITranslationService.shared.translateOutgoing(text: text, chatId: peerId, context: strongSelf.context)
+{indent}            |> mapToSignal {{ translatedText -> Signal<[MessageId?], NoError> in
+{indent}                var newAttributes = attributes
+{indent}                newAttributes.append(TranslationMessageAttribute(text: originalText, entities: [], toLang: "en"))
+{indent}                return enqueueMessages(account: strongSelf.context.account, peerId: peerId, messages: [.message(text: translatedText, attributes: newAttributes, inlineStickers: inlineStickers, mediaReference: mediaReference, threadId: threadId, replyToMessageId: replyToMessageId, replyToStoryId: replyToStoryId, localGroupingKey: localGroupingKey, correlationId: correlationId, bubbleUpEmojiOrStickersets: bubbleUpEmojiOrStickersets)])
+{indent}            }}).start()
+{indent}        }} else {{
+{indent}            let _ = enqueueMessages(account: strongSelf.context.account, peerId: peerId, messages: [aiMsg]).start()
 {indent}        }}
 {indent}    case .forward:
-{indent}        return .single(message)
+{indent}        let _ = enqueueMessages(account: strongSelf.context.account, peerId: peerId, messages: [aiMsg]).start()
 {indent}    }}
 {indent}}}
-{indent}signal = combineLatest(aiTranslateSignals)
-{indent}|> mapToSignal {{ translatedMessages -> Signal<[MessageId?], NoError> in
-{indent}    return enqueueMessages(account: strongSelf.context.account, peerId: peerId, messages: translatedMessages)
-{indent}}}"""
+{indent}signal = .single([])"""
 
     content = content.replace(old_line, new_code, 1)
 
