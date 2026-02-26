@@ -142,20 +142,53 @@ jobs:
         run: |
           python3 scripts/patch_build_configuration.py telegram-ios-build
 
-      - name: Setup Bazel remote cache
+      - name: Restore Bazel disk cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/bazel-disk-cache
+          key: bazel-disk-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            bazel-disk-${{ runner.os }}-
+
+      - name: Restore Bazel repository cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/bazel-repo
+          key: bazel-repo-${{ runner.os }}-${{ hashFiles('telegram-ios-build/WORKSPACE') }}
+          restore-keys: |
+            bazel-repo-${{ runner.os }}-
+
+      - name: Setup Bazel caches
         run: |
+          mkdir -p /tmp/bazel-disk-cache ~/.cache/bazel-repo
+
+          # L1: Local disk cache (persisted via actions/cache between runs)
+          echo "build --disk_cache=/tmp/bazel-disk-cache" >> telegram-ios-build/.bazelrc
+          echo "build --experimental_disk_cache_gc_max_size=8G" >> telegram-ios-build/.bazelrc
+
+          # Repository cache for external deps
+          echo "build --repository_cache=$HOME/.cache/bazel-repo" >> telegram-ios-build/.bazelrc
+
+          # Performance flags
+          echo "build --experimental_remote_cache_compression" >> telegram-ios-build/.bazelrc
+          echo "build --reuse_sandbox_directories" >> telegram-ios-build/.bazelrc
+          echo "startup --host_jvm_args=-Xmx6g" >> telegram-ios-build/.bazelrc
+
+          # L2: GCS remote cache (shared across all runs)
           GCS_KEY='${{ secrets.GCS_SA_KEY }}'
           if [ -n "$GCS_KEY" ] && [ "$GCS_KEY" != "" ]; then
             echo "$GCS_KEY" > /tmp/gcs-key.json
             echo "GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcs-key.json" >> $GITHUB_ENV
             echo "USE_GCS_CACHE=true" >> $GITHUB_ENV
-            # Tell Bazel to use the credentials for GCS access
             echo "build --google_default_credentials=true" >> telegram-ios-build/.bazelrc
-            echo "GCS cache configured with authentication"
+            echo "GCS remote cache configured (L2)"
           else
             echo "USE_GCS_CACHE=false" >> $GITHUB_ENV
-            echo "WARNING: GCS_SA_KEY not set, building without remote cache"
+            echo "Building without GCS remote cache"
           fi
+
+          echo "=== Bazel cache config ==="
+          cat telegram-ios-build/.bazelrc
 
       - name: Build IPA
         working-directory: telegram-ios-build
@@ -169,9 +202,9 @@ jobs:
           CACHE_FLAG=""
           if [ "$USE_GCS_CACHE" = "true" ]; then
             CACHE_FLAG="--cacheHost=https://storage.googleapis.com/translategram-bazel-cache"
-            echo "=== Starting build (with GCS remote cache) ==="
+            echo "=== Starting build (disk cache L1 + GCS L2) ==="
           else
-            echo "=== Starting build (no remote cache) ==="
+            echo "=== Starting build (disk cache only) ==="
           fi
 
           python3 build-system/Make/Make.py \
@@ -182,6 +215,9 @@ jobs:
             --buildNumber=${{ github.run_number }} \
             --configuration=debug_arm64
 
+          echo ""
+          echo "=== Disk cache size ==="
+          du -sh /tmp/bazel-disk-cache || true
           echo "=== Build complete ==="
 
       - name: Find and collect artifacts
