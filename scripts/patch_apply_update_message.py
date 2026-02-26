@@ -38,6 +38,15 @@ def patch_apply_update_message(filepath: str) -> None:
     print("Patched single message path")
 
     # Patch 2: Group message path (line ~505)
+    # The group path declares `let attributes` (immutable), so we need to change it to `var`
+    let_target = "                let attributes: [MessageAttribute]"
+    var_replacement = "                var attributes: [MessageAttribute]"
+    if let_target not in content:
+        print("WARNING: Could not find 'let attributes' in group message path (may already be patched)")
+    else:
+        content = content.replace(let_target, var_replacement, 1)
+        print("Changed 'let attributes' to 'var attributes' in group message path")
+
     target2 = "                attributes = updatedMessage.attributes\n                text = updatedMessage.text"
 
     if target2 not in content:
