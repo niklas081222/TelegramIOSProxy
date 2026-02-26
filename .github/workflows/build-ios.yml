@@ -144,9 +144,18 @@ jobs:
 
       - name: Setup Bazel remote cache
         run: |
-          echo '${{ secrets.GCS_SA_KEY }}' > /tmp/gcs-key.json
-          echo "GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcs-key.json" >> $GITHUB_ENV
-          echo "GCS cache configured for translategram-bazel-cache bucket"
+          GCS_KEY='${{ secrets.GCS_SA_KEY }}'
+          if [ -n "$GCS_KEY" ] && [ "$GCS_KEY" != "" ]; then
+            echo "$GCS_KEY" > /tmp/gcs-key.json
+            echo "GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcs-key.json" >> $GITHUB_ENV
+            echo "USE_GCS_CACHE=true" >> $GITHUB_ENV
+            # Tell Bazel to use the credentials for GCS access
+            echo "build --google_default_credentials=true" >> telegram-ios-build/.bazelrc
+            echo "GCS cache configured with authentication"
+          else
+            echo "USE_GCS_CACHE=false" >> $GITHUB_ENV
+            echo "WARNING: GCS_SA_KEY not set, building without remote cache"
+          fi
 
       - name: Build IPA
         working-directory: telegram-ios-build
@@ -157,9 +166,16 @@ jobs:
           python3 --version
           echo ""
 
-          echo "=== Starting build (with GCS remote cache) ==="
+          CACHE_FLAG=""
+          if [ "$USE_GCS_CACHE" = "true" ]; then
+            CACHE_FLAG="--cacheHost=https://storage.googleapis.com/translategram-bazel-cache"
+            echo "=== Starting build (with GCS remote cache) ==="
+          else
+            echo "=== Starting build (no remote cache) ==="
+          fi
+
           python3 build-system/Make/Make.py \
-            --cacheHost=https://storage.googleapis.com/translategram-bazel-cache \
+            $CACHE_FLAG \
             build \
             --configurationPath=build-system/appstore-configuration.json \
             --codesigningInformationPath=build-system/fake-codesigning \
