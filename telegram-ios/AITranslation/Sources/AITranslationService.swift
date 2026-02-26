@@ -96,6 +96,7 @@ public final class AITranslationService {
     // MARK: - Batch Translation for ExperimentalInternalTranslationService
 
     /// Translates a batch of texts for the built-in translation system.
+    /// Uses the /translate/batch endpoint for a single HTTP request.
     public func translateTexts(
         texts: [AnyHashable: String],
         fromLang: String,
@@ -113,23 +114,26 @@ public final class AITranslationService {
             direction = "outgoing"
         }
 
-        let signals: [Signal<(AnyHashable, String), NoError>] = texts.map { key, text in
-            return client.translate(
-                text: text,
-                direction: direction,
-                chatId: 0,
-                context: []
-            )
-            |> map { translatedText in
-                return (key, translatedText)
-            }
+        // Build batch items with string IDs for round-tripping
+        var keyMap: [String: AnyHashable] = [:]
+        var batchItems: [AIBatchTextItem] = []
+        for (index, (key, text)) in texts.enumerated() {
+            let id = "\(index)"
+            keyMap[id] = key
+            batchItems.append(AIBatchTextItem(id: id, text: text, direction: direction))
         }
 
-        return combineLatest(signals)
+        return client.translateBatch(items: batchItems)
         |> map { results -> [AnyHashable: String]? in
+            if results.isEmpty && !texts.isEmpty {
+                // Batch endpoint failed, return originals
+                return texts
+            }
             var dict: [AnyHashable: String] = [:]
-            for (key, value) in results {
-                dict[key] = value
+            for result in results {
+                if let key = keyMap[result.id] {
+                    dict[key] = result.translationFailed ? texts[key] ?? result.originalText : result.translatedText
+                }
             }
             return dict
         }

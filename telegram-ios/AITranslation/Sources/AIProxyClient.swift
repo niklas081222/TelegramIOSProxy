@@ -48,6 +48,49 @@ public struct AITranslateResponse: Codable {
     }
 }
 
+// MARK: - Batch Models
+
+public struct AIBatchTextItem: Codable {
+    public let id: String
+    public let text: String
+    public let direction: String
+    public let chatId: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, text, direction
+        case chatId = "chat_id"
+    }
+
+    public init(id: String, text: String, direction: String, chatId: String = "") {
+        self.id = id
+        self.text = text
+        self.direction = direction
+        self.chatId = chatId
+    }
+}
+
+public struct AIBatchTranslateRequest: Codable {
+    public let texts: [AIBatchTextItem]
+}
+
+public struct AIBatchResultItem: Codable {
+    public let id: String
+    public let translatedText: String
+    public let originalText: String
+    public let translationFailed: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case translatedText = "translated_text"
+        case originalText = "original_text"
+        case translationFailed = "translation_failed"
+    }
+}
+
+public struct AIBatchTranslateResponse: Codable {
+    public let results: [AIBatchResultItem]
+}
+
 public struct AIHealthResponse: Codable {
     public let status: String
     public let uptimeSeconds: Double
@@ -79,6 +122,7 @@ public final class AIProxyClient {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 20
         config.timeoutIntervalForResource = 25
+        config.httpMaximumConnectionsPerHost = 20
         self.session = URLSession(configuration: config)
     }
 
@@ -145,6 +189,60 @@ public final class AIProxyClient {
                     }
                 } catch {
                     subscriber.putNext(text)
+                }
+                subscriber.putCompletion()
+            }
+
+            task.resume()
+
+            return ActionDisposable {
+                task.cancel()
+            }
+        }
+    }
+
+    // MARK: - Batch Translate
+
+    public func translateBatch(
+        items: [AIBatchTextItem]
+    ) -> Signal<[AIBatchResultItem], NoError> {
+        guard let url = URL(string: "\(baseURL)/translate/batch") else {
+            return .single([])
+        }
+
+        let request = AIBatchTranslateRequest(texts: items)
+
+        return Signal { subscriber in
+            var urlRequest = URLRequest(url: url)
+            urlRequest.httpMethod = "POST"
+            urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+            do {
+                urlRequest.httpBody = try JSONEncoder().encode(request)
+            } catch {
+                subscriber.putNext([])
+                subscriber.putCompletion()
+                return EmptyDisposable
+            }
+
+            let task = self.session.dataTask(with: urlRequest) { data, response, error in
+                if let _ = error {
+                    subscriber.putNext([])
+                    subscriber.putCompletion()
+                    return
+                }
+
+                guard let data = data else {
+                    subscriber.putNext([])
+                    subscriber.putCompletion()
+                    return
+                }
+
+                do {
+                    let response = try JSONDecoder().decode(AIBatchTranslateResponse.self, from: data)
+                    subscriber.putNext(response.results)
+                } catch {
+                    subscriber.putNext([])
                 }
                 subscriber.putCompletion()
             }

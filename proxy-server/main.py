@@ -62,12 +62,35 @@ class TranslateResponse(BaseModel):
     translation_failed: bool = False
 
 
+class BatchTextItem(BaseModel):
+    id: str
+    text: str
+    direction: str = "incoming"
+    chat_id: str = ""
+
+
+class BatchTranslateRequest(BaseModel):
+    texts: list[BatchTextItem]
+
+
+class BatchResultItem(BaseModel):
+    id: str
+    translated_text: str
+    original_text: str
+    translation_failed: bool = False
+
+
+class BatchTranslateResponse(BaseModel):
+    results: list[BatchResultItem]
+
+
 # --- Translation Service ---
 
 
 class TranslationService:
     def __init__(self):
-        self.client = httpx.AsyncClient(timeout=REQUEST_TIMEOUT)
+        limits = httpx.Limits(max_connections=100, max_keepalive_connections=20)
+        self.client = httpx.AsyncClient(timeout=REQUEST_TIMEOUT, limits=limits)
         self.stats = {
             "total_requests": 0,
             "successful": 0,
@@ -77,28 +100,34 @@ class TranslationService:
             "total_response_time_ms": 0.0,
         }
         self.last_successful_translation: Optional[float] = None
+        self._prompt_cache: dict[str, str] = {}
+        self._load_prompts()
+
+    def _load_prompts(self) -> None:
+        """Load all system prompts from disk into memory cache."""
+        for direction, path in [
+            ("incoming", SYSTEM_PROMPT_INCOMING_PATH),
+            ("outgoing", SYSTEM_PROMPT_OUTGOING_PATH),
+            ("legacy", SYSTEM_PROMPT_PATH),
+        ]:
+            try:
+                self._prompt_cache[direction] = path.read_text().strip()
+            except FileNotFoundError:
+                pass
+
+    def update_prompt_cache(self, direction: str, prompt: str) -> None:
+        """Update cache immediately when user edits a prompt via the API."""
+        self._prompt_cache[direction] = prompt.strip()
 
     def _read_system_prompt(self, direction: str = "outgoing") -> str:
-        # Try direction-specific file first, then legacy file, then default
-        if direction == "incoming":
-            path = SYSTEM_PROMPT_INCOMING_PATH
-        else:
-            path = SYSTEM_PROMPT_OUTGOING_PATH
-
-        try:
-            return path.read_text().strip()
-        except FileNotFoundError:
-            pass
-
-        # Fall back to legacy single prompt file
-        try:
-            return SYSTEM_PROMPT_PATH.read_text().strip()
-        except FileNotFoundError:
-            logger.warning("No system prompt file found, using default prompt")
-            return (
-                "You are a translator. Translate the given text accurately. "
-                "Only output the translation, nothing else."
-            )
+        if direction in self._prompt_cache:
+            return self._prompt_cache[direction]
+        if "legacy" in self._prompt_cache:
+            return self._prompt_cache["legacy"]
+        return (
+            "You are a translator. Translate the given text accurately. "
+            "Only output the translation, nothing else."
+        )
 
     def _build_messages(
         self,
@@ -243,9 +272,9 @@ class TranslationService:
 
         # Attempt 1: initial try
         # Attempts 2-6: retries with appropriate strategy per error type
-        max_total_attempts = 6  # 1 initial + 5 retries (worst case: empty response)
+        max_total_attempts = 4  # 1 initial + 3 retries (worst case: empty response)
 
-        empty_delays = [1, 2, 4, 8, 16]
+        empty_delays = [0.5, 1, 2]
         payment_delays = [5, 5, 5]
         timeout_delays = [0, 0, 0]
 
@@ -361,6 +390,35 @@ async def translate(request: TranslateRequest):
     return await translation_service.translate(request)
 
 
+@app.post("/translate/batch", response_model=BatchTranslateResponse)
+async def translate_batch(request: BatchTranslateRequest):
+    if not request.texts:
+        return BatchTranslateResponse(results=[])
+
+    async def translate_one(item: BatchTextItem) -> BatchResultItem:
+        if not item.text.strip():
+            return BatchResultItem(
+                id=item.id,
+                translated_text=item.text,
+                original_text=item.text,
+            )
+        req = TranslateRequest(
+            text=item.text,
+            direction=item.direction,
+            chat_id=item.chat_id,
+        )
+        resp = await translation_service.translate(req)
+        return BatchResultItem(
+            id=item.id,
+            translated_text=resp.translated_text,
+            original_text=resp.original_text,
+            translation_failed=resp.translation_failed,
+        )
+
+    results = await asyncio.gather(*(translate_one(item) for item in request.texts))
+    return BatchTranslateResponse(results=list(results))
+
+
 @app.get("/health")
 async def health():
     return {
@@ -394,6 +452,7 @@ async def get_prompt():
 @app.post("/prompt")
 async def set_prompt(update: PromptUpdate):
     SYSTEM_PROMPT_PATH.write_text(update.prompt)
+    translation_service.update_prompt_cache("legacy", update.prompt)
     logger.info(f"System prompt updated ({len(update.prompt)} chars)")
     return {"status": "ok", "length": len(update.prompt)}
 
@@ -416,6 +475,7 @@ async def get_prompt_by_direction(direction: str):
 async def set_prompt_by_direction(direction: str, update: PromptUpdate):
     path = _get_prompt_path(direction)
     path.write_text(update.prompt)
+    translation_service.update_prompt_cache(direction, update.prompt)
     logger.info(f"System prompt ({direction}) updated ({len(update.prompt)} chars)")
     return {"status": "ok", "direction": direction, "length": len(update.prompt)}
 
