@@ -159,8 +159,8 @@ public final class AIProxyClient {
 
     // MARK: - System Prompt
 
-    public func getPrompt() -> Signal<String, NoError> {
-        guard let url = URL(string: "\(baseURL)/prompt") else {
+    public func getPrompt(direction: String) -> Signal<String, NoError> {
+        guard let url = URL(string: "\(baseURL)/prompt/\(direction)") else {
             return .single("")
         }
 
@@ -186,8 +186,8 @@ public final class AIProxyClient {
         }
     }
 
-    public func setPrompt(_ prompt: String) -> Signal<Bool, NoError> {
-        guard let url = URL(string: "\(baseURL)/prompt") else {
+    public func setPrompt(_ prompt: String, direction: String) -> Signal<Bool, NoError> {
+        guard let url = URL(string: "\(baseURL)/prompt/\(direction)") else {
             return .single(false)
         }
 

@@ -13,6 +13,8 @@ from pydantic import BaseModel, Field
 
 CONFIG_PATH = Path(__file__).parent / "config.json"
 SYSTEM_PROMPT_PATH = Path(__file__).parent / "system_prompt.txt"
+SYSTEM_PROMPT_OUTGOING_PATH = Path(__file__).parent / "system_prompt_outgoing.txt"
+SYSTEM_PROMPT_INCOMING_PATH = Path(__file__).parent / "system_prompt_incoming.txt"
 
 with open(CONFIG_PATH) as f:
     config = json.load(f)
@@ -76,11 +78,23 @@ class TranslationService:
         }
         self.last_successful_translation: Optional[float] = None
 
-    def _read_system_prompt(self) -> str:
+    def _read_system_prompt(self, direction: str = "outgoing") -> str:
+        # Try direction-specific file first, then legacy file, then default
+        if direction == "incoming":
+            path = SYSTEM_PROMPT_INCOMING_PATH
+        else:
+            path = SYSTEM_PROMPT_OUTGOING_PATH
+
+        try:
+            return path.read_text().strip()
+        except FileNotFoundError:
+            pass
+
+        # Fall back to legacy single prompt file
         try:
             return SYSTEM_PROMPT_PATH.read_text().strip()
         except FileNotFoundError:
-            logger.warning("system_prompt.txt not found, using default prompt")
+            logger.warning("No system prompt file found, using default prompt")
             return (
                 "You are a translator. Translate the given text accurately. "
                 "Only output the translation, nothing else."
@@ -184,7 +198,7 @@ class TranslationService:
         self.stats["total_requests"] += 1
         start_time = time.time()
 
-        system_prompt = self._read_system_prompt()
+        system_prompt = self._read_system_prompt(request.direction)
         messages = self._build_messages(
             request.text, request.direction, request.context, system_prompt
         )
@@ -360,6 +374,14 @@ class PromptUpdate(BaseModel):
     prompt: str
 
 
+def _get_prompt_path(direction: str) -> Path:
+    if direction == "incoming":
+        return SYSTEM_PROMPT_INCOMING_PATH
+    elif direction == "outgoing":
+        return SYSTEM_PROMPT_OUTGOING_PATH
+    return SYSTEM_PROMPT_PATH
+
+
 @app.get("/prompt")
 async def get_prompt():
     try:
@@ -374,6 +396,28 @@ async def set_prompt(update: PromptUpdate):
     SYSTEM_PROMPT_PATH.write_text(update.prompt)
     logger.info(f"System prompt updated ({len(update.prompt)} chars)")
     return {"status": "ok", "length": len(update.prompt)}
+
+
+@app.get("/prompt/{direction}")
+async def get_prompt_by_direction(direction: str):
+    path = _get_prompt_path(direction)
+    try:
+        content = path.read_text()
+    except FileNotFoundError:
+        # Fall back to legacy single file
+        try:
+            content = SYSTEM_PROMPT_PATH.read_text()
+        except FileNotFoundError:
+            content = ""
+    return {"prompt": content, "direction": direction}
+
+
+@app.post("/prompt/{direction}")
+async def set_prompt_by_direction(direction: str, update: PromptUpdate):
+    path = _get_prompt_path(direction)
+    path.write_text(update.prompt)
+    logger.info(f"System prompt ({direction}) updated ({len(update.prompt)} chars)")
+    return {"status": "ok", "direction": direction, "length": len(update.prompt)}
 
 
 @app.get("/stats")

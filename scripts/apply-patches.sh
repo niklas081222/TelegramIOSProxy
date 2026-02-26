@@ -76,8 +76,17 @@ else
     echo "    Done."
 fi
 
-# 5. Patch PeerInfoScreen to add Translation Proxy settings entry
-echo "  [5/6] Patching PeerInfoScreen for Translation Proxy settings..."
+# 5. Patch ChatControllerLoadDisplayNode.swift for auto incoming translation
+echo "  [5/7] Patching ChatControllerLoadDisplayNode.swift for incoming translation..."
+if grep -q "AI Translation: auto-enable incoming" "$LOAD_DISPLAY_NODE" 2>/dev/null; then
+    echo "    Already patched, skipping."
+else
+    python3 "${SCRIPT_DIR}/patch_incoming_translation.py" "$LOAD_DISPLAY_NODE"
+    echo "    Done."
+fi
+
+# 6. Patch PeerInfoScreen to add Translation Proxy settings entry
+echo "  [6/7] Patching PeerInfoScreen for Translation Proxy settings..."
 PEERINFO="${TARGET_DIR}/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoScreen.swift"
 if grep -q "import AITranslation" "$PEERINFO" 2>/dev/null; then
     echo "    Already patched, skipping."
@@ -86,8 +95,8 @@ else
     echo "    Done."
 fi
 
-# 6. Apply any additional .patch files
-echo "  [6/6] Applying additional patch files..."
+# 7. Apply any additional .patch files
+echo "  [7/7] Applying additional patch files..."
 PATCH_COUNT=0
 for patch_file in "${PATCHES_DIR}"/*.patch; do
     [ -f "$patch_file" ] || continue

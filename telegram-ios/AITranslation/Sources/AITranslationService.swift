@@ -80,28 +80,16 @@ public final class AITranslationService {
             return .single(text)
         }
 
-        let contextSignal: Signal<[AIContextMessage], NoError>
-        if AITranslationSettings.contextMode == 2 {
-            contextSignal = ConversationContextProvider.getContext(
-                chatId: chatId,
-                context: context
-            )
-        } else {
-            contextSignal = .single([])
-        }
-
-        return contextSignal
-        |> mapToSignal { [weak self] contextMessages -> Signal<String, NoError> in
-            return client.translate(
-                text: text,
-                direction: "incoming",
-                chatId: chatId.id._internalGetInt64Value(),
-                context: contextMessages
-            )
-            |> map { translatedText -> String in
-                self?.cache.set(messageId, translation: translatedText)
-                return translatedText
-            }
+        // Incoming: always translate individually, no conversation context
+        return client.translate(
+            text: text,
+            direction: "incoming",
+            chatId: chatId.id._internalGetInt64Value(),
+            context: []
+        )
+        |> map { [weak self] translatedText -> String in
+            self?.cache.set(messageId, translation: translatedText)
+            return translatedText
         }
     }
 
@@ -173,18 +161,18 @@ public final class AITranslationService {
 
     // MARK: - System Prompt
 
-    public func getPrompt() -> Signal<String, NoError> {
+    public func getPrompt(direction: String) -> Signal<String, NoError> {
         guard let client = proxyClient else {
             return .single("")
         }
-        return client.getPrompt()
+        return client.getPrompt(direction: direction)
     }
 
-    public func setPrompt(_ prompt: String) -> Signal<Bool, NoError> {
+    public func setPrompt(_ prompt: String, direction: String) -> Signal<Bool, NoError> {
         guard let client = proxyClient else {
             return .single(false)
         }
-        return client.setPrompt(prompt)
+        return client.setPrompt(prompt, direction: direction)
     }
 
     // MARK: - Connection Test

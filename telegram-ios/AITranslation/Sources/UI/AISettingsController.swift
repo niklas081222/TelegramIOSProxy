@@ -40,7 +40,8 @@ private enum AISettingsEntry: ItemListNodeEntry {
     case clearCache(String)
 
     case promptHeader(String)
-    case promptButton(String)
+    case outgoingPromptButton(String)
+    case incomingPromptButton(String)
 
     var section: ItemListSectionId {
         switch self {
@@ -52,7 +53,7 @@ private enum AISettingsEntry: ItemListNodeEntry {
             return AISettingsSection.devSettings.rawValue
         case .cacheHeader, .clearCache:
             return AISettingsSection.cache.rawValue
-        case .promptHeader, .promptButton:
+        case .promptHeader, .outgoingPromptButton, .incomingPromptButton:
             return AISettingsSection.prompt.rawValue
         }
     }
@@ -74,7 +75,8 @@ private enum AISettingsEntry: ItemListNodeEntry {
         case .cacheHeader: return 30
         case .clearCache: return 31
         case .promptHeader: return 40
-        case .promptButton: return 41
+        case .outgoingPromptButton: return 41
+        case .incomingPromptButton: return 42
         }
     }
 
@@ -82,7 +84,6 @@ private enum AISettingsEntry: ItemListNodeEntry {
         return lhs.stableId < rhs.stableId
     }
 
-    // Compare by stableId AND associated values so the list detects changes
     static func == (lhs: AISettingsEntry, rhs: AISettingsEntry) -> Bool {
         switch (lhs, rhs) {
         case let (.connectionHeader(a), .connectionHeader(b)):
@@ -115,7 +116,9 @@ private enum AISettingsEntry: ItemListNodeEntry {
             return a == b
         case let (.promptHeader(a), .promptHeader(b)):
             return a == b
-        case let (.promptButton(a), .promptButton(b)):
+        case let (.outgoingPromptButton(a), .outgoingPromptButton(b)):
+            return a == b
+        case let (.incomingPromptButton(a), .incomingPromptButton(b)):
             return a == b
         default:
             return false
@@ -262,7 +265,7 @@ private enum AISettingsEntry: ItemListNodeEntry {
                 sectionId: self.section
             )
 
-        case let .promptButton(title):
+        case let .outgoingPromptButton(title):
             return ItemListActionItem(
                 presentationData: presentationData,
                 title: title,
@@ -270,7 +273,18 @@ private enum AISettingsEntry: ItemListNodeEntry {
                 alignment: .natural,
                 sectionId: self.section,
                 style: .blocks,
-                action: { arguments.openPromptEditor() }
+                action: { arguments.openPromptEditor("outgoing") }
+            )
+
+        case let .incomingPromptButton(title):
+            return ItemListActionItem(
+                presentationData: presentationData,
+                title: title,
+                kind: .generic,
+                alignment: .natural,
+                sectionId: self.section,
+                style: .blocks,
+                action: { arguments.openPromptEditor("incoming") }
             )
         }
     }
@@ -288,7 +302,7 @@ private final class AISettingsArguments {
     let editContextCount: () -> Void
     let toggleShowRaw: (Bool) -> Void
     let clearCache: () -> Void
-    let openPromptEditor: () -> Void
+    let openPromptEditor: (String) -> Void
 
     init(
         editProxyURL: @escaping () -> Void,
@@ -300,7 +314,7 @@ private final class AISettingsArguments {
         editContextCount: @escaping () -> Void,
         toggleShowRaw: @escaping (Bool) -> Void,
         clearCache: @escaping () -> Void,
-        openPromptEditor: @escaping () -> Void
+        openPromptEditor: @escaping (String) -> Void
     ) {
         self.editProxyURL = editProxyURL
         self.testConnection = testConnection
@@ -337,14 +351,13 @@ private func aiSettingsEntries(state: AISettingsState) -> [AISettingsEntry] {
     entries.append(.translationHeader("TRANSLATION"))
     entries.append(.globalToggle("Enable AI Translation", isEnabled))
 
-    // Only show directional toggles when global translation is enabled
     if isEnabled {
         entries.append(.incomingToggle("Translate Incoming (DE > EN)", AITranslationSettings.autoTranslateIncoming))
         entries.append(.outgoingToggle("Translate Outgoing (EN > DE)", AITranslationSettings.autoTranslateOutgoing))
     }
 
     entries.append(.devHeader("DEVELOPER SETTINGS"))
-    entries.append(.contextMode("Translation Context", AITranslationSettings.contextMode))
+    entries.append(.contextMode("Outgoing Context", AITranslationSettings.contextMode))
     if AITranslationSettings.contextMode == 2 {
         entries.append(.contextCount("Context Messages", AITranslationSettings.contextMessageCount))
     }
@@ -353,8 +366,9 @@ private func aiSettingsEntries(state: AISettingsState) -> [AISettingsEntry] {
     entries.append(.cacheHeader("CACHE"))
     entries.append(.clearCache("Clear Translation Cache"))
 
-    entries.append(.promptHeader("SYSTEM PROMPT"))
-    entries.append(.promptButton("Edit Prompt"))
+    entries.append(.promptHeader("SYSTEM PROMPTS"))
+    entries.append(.outgoingPromptButton("Outgoing Prompt (EN > DE)"))
+    entries.append(.incomingPromptButton("Incoming Prompt (DE > EN)"))
 
     return entries
 }
@@ -365,7 +379,6 @@ public func aiSettingsController(context: AccountContext) -> ViewController {
     let statePromise = ValuePromise(AISettingsState(), ignoreRepeated: true)
     let stateValue = Atomic(value: AISettingsState())
 
-    // Use a separate trigger to force entry regeneration when settings change
     let settingsRevision = ValuePromise<Int>(0, ignoreRepeated: false)
     let settingsRevisionValue = Atomic<Int>(value: 0)
 
@@ -466,7 +479,7 @@ public func aiSettingsController(context: AccountContext) -> ViewController {
             )
             context.sharedContext.mainWindow?.present(undoController, on: .root)
         },
-        openPromptEditor: {
+        openPromptEditor: { direction in
             let alert = UIAlertController(
                 title: "Enter Password",
                 message: "Enter the 4-digit PIN to access prompt settings",
@@ -489,7 +502,7 @@ public func aiSettingsController(context: AccountContext) -> ViewController {
                     context.sharedContext.mainWindow?.presentNative(errorAlert)
                     return
                 }
-                let promptController = aiPromptEditorController(context: context)
+                let promptController = aiPromptEditorController(context: context, direction: direction)
                 pushControllerImpl?(promptController)
             })
             context.sharedContext.mainWindow?.presentNative(alert)

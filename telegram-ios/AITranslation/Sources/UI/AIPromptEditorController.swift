@@ -6,29 +6,36 @@ import TelegramPresentationData
 import AccountContext
 import UndoUI
 
-public func aiPromptEditorController(context: AccountContext) -> ViewController {
-    let controller = AIPromptEditorViewController(context: context)
+public func aiPromptEditorController(context: AccountContext, direction: String) -> ViewController {
+    let controller = AIPromptEditorViewController(context: context, direction: direction)
     return controller
 }
 
 private final class AIPromptEditorViewController: ViewController {
     private let context: AccountContext
+    private let direction: String
     private var textView: UITextView?
     private var loadingLabel: UILabel?
     private var disposable: Disposable?
 
-    init(context: AccountContext) {
+    init(context: AccountContext, direction: String) {
         self.context = context
+        self.direction = direction
+        let presentationData = context.sharedContext.currentPresentationData.with { $0 }
         super.init(navigationBarPresentationData: NavigationBarPresentationData(
-            presentationData: context.sharedContext.currentPresentationData.with { $0 }
+            presentationData: presentationData
         ))
-        self.title = "System Prompt"
-        self.navigationItem.rightBarButtonItem = UIBarButtonItem(
+        if direction == "outgoing" {
+            self.title = "Outgoing Prompt (EN>DE)"
+        } else {
+            self.title = "Incoming Prompt (DE>EN)"
+        }
+        self.navigationItem.setRightBarButton(UIBarButtonItem(
             title: "Save",
             style: .done,
             target: self,
             action: #selector(saveTapped)
-        )
+        ), animated: false)
     }
 
     required init(coder: NSCoder) {
@@ -39,25 +46,24 @@ private final class AIPromptEditorViewController: ViewController {
         disposable?.dispose()
     }
 
-    override func viewDidLoad() {
-        super.viewDidLoad()
+    override func loadDisplayNode() {
+        self.displayNode = ASDisplayNode()
+        self.displayNodeDidLoad()
+    }
+
+    override func displayNodeDidLoad() {
+        super.displayNodeDidLoad()
 
         let presentationData = self.context.sharedContext.currentPresentationData.with { $0 }
-        self.view.backgroundColor = presentationData.theme.list.blocksBackgroundColor
+        self.displayNode.backgroundColor = presentationData.theme.list.blocksBackgroundColor
 
         let loading = UILabel()
         loading.text = "Loading prompt..."
         loading.textColor = presentationData.theme.list.itemSecondaryTextColor
         loading.font = UIFont.systemFont(ofSize: 15)
         loading.textAlignment = .center
-        loading.translatesAutoresizingMaskIntoConstraints = false
-        self.view.addSubview(loading)
+        self.displayNode.view.addSubview(loading)
         self.loadingLabel = loading
-
-        NSLayoutConstraint.activate([
-            loading.centerXAnchor.constraint(equalTo: self.view.centerXAnchor),
-            loading.centerYAnchor.constraint(equalTo: self.view.centerYAnchor)
-        ])
 
         let tv = UITextView()
         tv.font = UIFont.monospacedSystemFont(ofSize: 14, weight: .regular)
@@ -65,22 +71,14 @@ private final class AIPromptEditorViewController: ViewController {
         tv.backgroundColor = presentationData.theme.list.itemBlocksBackgroundColor
         tv.layer.cornerRadius = 10
         tv.textContainerInset = UIEdgeInsets(top: 12, left: 8, bottom: 12, right: 8)
-        tv.translatesAutoresizingMaskIntoConstraints = false
         tv.alpha = 0
         tv.autocorrectionType = .no
         tv.autocapitalizationType = .none
         tv.spellCheckingType = .no
-        self.view.addSubview(tv)
+        self.displayNode.view.addSubview(tv)
         self.textView = tv
 
-        NSLayoutConstraint.activate([
-            tv.topAnchor.constraint(equalTo: self.view.safeAreaLayoutGuide.topAnchor, constant: 16),
-            tv.leadingAnchor.constraint(equalTo: self.view.leadingAnchor, constant: 16),
-            tv.trailingAnchor.constraint(equalTo: self.view.trailingAnchor, constant: -16),
-            tv.bottomAnchor.constraint(equalTo: self.view.safeAreaLayoutGuide.bottomAnchor, constant: -16)
-        ])
-
-        self.disposable = (AITranslationService.shared.getPrompt()
+        self.disposable = (AITranslationService.shared.getPrompt(direction: self.direction)
         |> deliverOnMainQueue).startStrict(next: { [weak self] prompt in
             guard let self = self else { return }
             self.loadingLabel?.removeFromSuperview()
@@ -91,12 +89,34 @@ private final class AIPromptEditorViewController: ViewController {
         })
     }
 
+    override func containerLayoutUpdated(_ layout: ContainerViewLayout, transition: ContainedViewLayoutTransition) {
+        super.containerLayoutUpdated(layout, transition: transition)
+
+        let navBarHeight = self.navigationLayout(layout: layout).navigationFrame.maxY
+        let insets = layout.safeInsets
+        let padding: CGFloat = 16
+        let contentTop = navBarHeight + padding
+        let contentFrame = CGRect(
+            x: insets.left + padding,
+            y: contentTop,
+            width: layout.size.width - insets.left - insets.right - padding * 2,
+            height: layout.size.height - contentTop - insets.bottom - padding
+        )
+
+        if let textView = self.textView {
+            transition.updateFrame(view: textView, frame: contentFrame)
+        }
+        if let loadingLabel = self.loadingLabel {
+            loadingLabel.frame = contentFrame
+        }
+    }
+
     @objc private func saveTapped() {
         guard let text = textView?.text else { return }
 
         self.navigationItem.rightBarButtonItem?.isEnabled = false
 
-        self.disposable = (AITranslationService.shared.setPrompt(text)
+        self.disposable = (AITranslationService.shared.setPrompt(text, direction: self.direction)
         |> deliverOnMainQueue).startStrict(next: { [weak self] success in
             guard let self = self else { return }
             self.navigationItem.rightBarButtonItem?.isEnabled = true
