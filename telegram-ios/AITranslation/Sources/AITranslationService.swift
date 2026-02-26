@@ -103,7 +103,7 @@ public final class AITranslationService {
     ) -> Signal<[AnyHashable: String]?, NoError> {
         guard AITranslationSettings.enabled,
               let client = proxyClient else {
-            return .single(nil)
+            return .single(texts)
         }
 
         let direction: String

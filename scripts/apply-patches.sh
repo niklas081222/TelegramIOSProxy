@@ -76,12 +76,13 @@ else
     echo "    Done."
 fi
 
-# 5. Patch ChatControllerLoadDisplayNode.swift for auto incoming translation
-echo "  [5/8] Patching ChatControllerLoadDisplayNode.swift for incoming translation..."
-if grep -q "AI Translation: auto-enable incoming" "$LOAD_DISPLAY_NODE" 2>/dev/null; then
+# 5. Patch ChatHistoryListNode.swift for incoming translation
+echo "  [5/8] Patching ChatHistoryListNode.swift for incoming translation..."
+HISTORY_LIST_NODE="${TARGET_DIR}/submodules/TelegramUI/Sources/ChatHistoryListNode.swift"
+if grep -q "AI Translation: force-enable incoming" "$HISTORY_LIST_NODE" 2>/dev/null; then
     echo "    Already patched, skipping."
 else
-    python3 "${SCRIPT_DIR}/patch_incoming_translation.py" "$LOAD_DISPLAY_NODE"
+    python3 "${SCRIPT_DIR}/patch_chat_history_list_node.py" "$HISTORY_LIST_NODE"
     echo "    Done."
 fi
 

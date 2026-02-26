@@ -74,22 +74,19 @@ def patch_load_display_node(filepath: str) -> None:
 {indent}|> mapToSignal {{ translatedMessages -> Signal<[MessageId?], NoError> in
 {indent}    return enqueueMessages(account: strongSelf.context.account, peerId: peerId, messages: translatedMessages)
 {indent}}}
-{indent}|> map {{ messageIds -> [MessageId?] in
-{indent}    if !aiOriginalTexts.isEmpty {{
-{indent}        let capturedOriginals = aiOriginalTexts
-{indent}        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {{
-{indent}            let _ = (aiPostbox.transaction {{ transaction -> Void in
-{indent}                for (index, maybeId) in messageIds.enumerated() {{
-{indent}                    guard let msgId = maybeId, let original = capturedOriginals[index] else {{ continue }}
-{indent}                    transaction.updateMessage(msgId, update: {{ currentMessage in
-{indent}                        let storeForwardInfo = currentMessage.forwardInfo.flatMap(StoreMessageForwardInfo.init)
-{indent}                        return .update(StoreMessage(id: currentMessage.id, globallyUniqueId: currentMessage.globallyUniqueId, groupingKey: currentMessage.groupingKey, threadId: currentMessage.threadId, timestamp: currentMessage.timestamp, flags: StoreMessageFlags(currentMessage.flags), tags: currentMessage.tags, globalTags: currentMessage.globalTags, localTags: currentMessage.localTags, forwardInfo: storeForwardInfo, authorId: currentMessage.author?.id, text: original, attributes: currentMessage.attributes, media: currentMessage.media))
-{indent}                    }})
-{indent}                }}
-{indent}            }}).start()
+{indent}|> mapToSignal {{ messageIds -> Signal<[MessageId?], NoError> in
+{indent}    let originals = aiOriginalTexts
+{indent}    guard !originals.isEmpty else {{ return .single(messageIds) }}
+{indent}    return aiPostbox.transaction {{ transaction -> Void in
+{indent}        for (index, maybeId) in messageIds.enumerated() {{
+{indent}            guard let msgId = maybeId, let original = originals[index] else {{ continue }}
+{indent}            transaction.updateMessage(msgId, update: {{ currentMessage in
+{indent}                let storeForwardInfo = currentMessage.forwardInfo.flatMap(StoreMessageForwardInfo.init)
+{indent}                return .update(StoreMessage(id: currentMessage.id, globallyUniqueId: currentMessage.globallyUniqueId, groupingKey: currentMessage.groupingKey, threadId: currentMessage.threadId, timestamp: currentMessage.timestamp, flags: StoreMessageFlags(currentMessage.flags), tags: currentMessage.tags, globalTags: currentMessage.globalTags, localTags: currentMessage.localTags, forwardInfo: storeForwardInfo, authorId: currentMessage.author?.id, text: original, attributes: currentMessage.attributes, media: currentMessage.media))
+{indent}            }})
 {indent}        }}
 {indent}    }}
-{indent}    return messageIds
+{indent}    |> map {{ _ -> [MessageId?] in return messageIds }}
 {indent}}}"""
 
     content = content.replace(old_line, new_code, 1)
