@@ -14,7 +14,8 @@ def patch_application_context(filepath: str) -> None:
 
     # 1. Add import AITranslation
     if "import AITranslation" not in content:
-        content = content.replace("import UIKit", "import UIKit\nimport AITranslation", 1)
+        # ApplicationContext.swift uses import Foundation, not import UIKit
+        content = content.replace("import Foundation", "import Foundation\nimport AITranslation", 1)
         print("Added import AITranslation")
 
     # 2. Insert observer startup before the notificationMessagesDisposable setup.
