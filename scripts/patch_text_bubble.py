@@ -36,8 +36,8 @@ def patch_text_bubble(filepath: str) -> None:
     # 1. Standard from item.associatedData (Telegram's pipeline)
     # 2. TranslationMessageAttribute exists (background observer pre-translated)
     # 3. Settings enabled + incoming (catch-all for all incoming messages)
-    # Uses a single ?? with combined condition to avoid Swift type inference issues.
-    new = """} else if !item.message.text.isEmpty, let translateToLanguage = item.associatedData.translateToLanguage ?? ((item.message.attributes.contains(where: { $0 is TranslationMessageAttribute }) || (incoming && AITranslationSettings.enabled && AITranslationSettings.autoTranslateIncoming)) ? ("de", "en") as (String, String)? : nil) {
+    # Note: item.associatedData.translateToLanguage is String? (target language only, e.g. "en")
+    new = """} else if !item.message.text.isEmpty, let translateToLanguage = item.associatedData.translateToLanguage ?? ((item.message.attributes.contains(where: { $0 is TranslationMessageAttribute }) || (incoming && AITranslationSettings.enabled && AITranslationSettings.autoTranslateIncoming)) ? "en" : nil) {
                         // AI Translation: removed incoming guard; three-way translateToLanguage fallback
                         if incoming && !item.message.attributes.contains(where: { $0 is TranslationMessageAttribute }) {
                             isTranslating = true
