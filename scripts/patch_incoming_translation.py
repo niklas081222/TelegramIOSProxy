@@ -5,6 +5,9 @@ Telegram's built-in translation requires the user to manually tap the "Translate
 banner. This patch auto-sets translationState to enabled (fromLang: "de", toLang: "en")
 when our AI translation is active, triggering Telegram's built-in pipeline which calls
 our AIExperimentalTranslationService.
+
+Also kicks off catch-up translation for any messages that don't have a
+TranslationMessageAttribute yet (pre-translates them via background observer).
 """
 import sys
 import re
@@ -43,6 +46,10 @@ def patch_incoming_translation(filepath: str) -> None:
                             )
                         }
                     }
+                    // AI Translation: catch-up translate recent messages that are missing translations
+                    if case let .peer(chatPeerId) = self.chatLocation {
+                        AIBackgroundTranslationObserver.translateMessages(peerId: chatPeerId, context: self.context)
+                    }
                 }
             }"""
 
@@ -51,7 +58,7 @@ def patch_incoming_translation(filepath: str) -> None:
     with open(filepath, "w") as f:
         f.write(content)
 
-    print(f"Patched {filepath} with incoming auto-translation override")
+    print(f"Patched {filepath} with incoming auto-translation override + catch-up")
 
 
 if __name__ == "__main__":

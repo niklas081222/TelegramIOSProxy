@@ -9,8 +9,11 @@ meaning zero messages are ever queued for translation.
 This patch adds a fallback that forces `translateToLanguage` to ("de", "en") when
 our AI translation service is active, bypassing both the premium guard and the
 missing persisted state.
+
+Uses regex for robust matching (tolerant of whitespace variations).
 """
 import sys
+import re
 
 
 def patch_chat_history_list_node(filepath: str) -> None:
@@ -23,23 +26,40 @@ def patch_chat_history_list_node(filepath: str) -> None:
         print("Added import AITranslation")
 
     # Target: the end of the translateToLanguage extraction block.
-    # We insert our override right after the closing brace of the if-let block.
-    target = "translateToLanguage = (normalizeTranslationLanguage(translationState.fromLang), normalizeTranslationLanguage(languageCode))\n                }"
+    # Use regex for flexible whitespace matching to avoid silent failures.
+    # Pattern: translateToLanguage = (normalizeTranslationLanguage(...), normalizeTranslationLanguage(languageCode))
+    #          }
+    pattern = re.compile(
+        r'(translateToLanguage\s*=\s*\(normalizeTranslationLanguage\(translationState\.fromLang\),\s*normalizeTranslationLanguage\(languageCode\)\))'
+        r'(\s*\})',
+        re.DOTALL
+    )
 
-    if target not in content:
-        print("ERROR: Could not find translateToLanguage extraction block in ChatHistoryListNode.swift")
-        print("Incoming translation override will NOT work.")
-        return
-
-    override_code = """translateToLanguage = (normalizeTranslationLanguage(translationState.fromLang), normalizeTranslationLanguage(languageCode))
-                }
+    match = pattern.search(content)
+    if not match:
+        # Fallback: try exact string match (original approach)
+        target = "translateToLanguage = (normalizeTranslationLanguage(translationState.fromLang), normalizeTranslationLanguage(languageCode))\n                }"
+        if target not in content:
+            print("ERROR: Could not find translateToLanguage extraction block in ChatHistoryListNode.swift")
+            print("Incoming translation override will NOT work.")
+            return
+        # Use the exact match
+        override_code = target + """
 
                 // AI Translation: force-enable incoming translation when our service is active
                 if translateToLanguage == nil && AITranslationSettings.enabled && AITranslationSettings.autoTranslateIncoming {
                     translateToLanguage = ("de", "en")
                 }"""
+        content = content.replace(target, override_code, 1)
+    else:
+        # Use regex match — preserve original whitespace
+        replacement = match.group(0) + """
 
-    content = content.replace(target, override_code, 1)
+                // AI Translation: force-enable incoming translation when our service is active
+                if translateToLanguage == nil && AITranslationSettings.enabled && AITranslationSettings.autoTranslateIncoming {
+                    translateToLanguage = ("de", "en")
+                }"""
+        content = content[:match.start()] + replacement + content[match.end():]
 
     with open(filepath, "w") as f:
         f.write(content)
