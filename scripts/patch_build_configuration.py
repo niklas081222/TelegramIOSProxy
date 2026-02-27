@@ -47,7 +47,7 @@ def patch_copy_profiles(build_dir):
         "",
         "",
         "def resolve_aps_environment_from_directory(source_path, team_id, bundle_id):",
-        '    return "development"',
+        '    return ""',
         "",
     ]
     new_func = "\n".join(new_func_lines) + "\n"
