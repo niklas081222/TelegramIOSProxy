@@ -76,7 +76,11 @@ def patch_load_display_node(filepath: str) -> None:
 {indent}// happen until translation completes (1-3s). Bypass it by clearing directly.
 {indent}if let textInputPanelNode = strongSelf.chatDisplayNode.inputPanelNode as? ChatTextInputPanelNode {{
 {indent}    textInputPanelNode.text = ""
-{indent}}}"""
+{indent}}}
+{indent}// Cancel the deferred text clear from setupSendActionOnViewUpdate().
+{indent}// Without this, the stored layoutActionOnViewTransition callback fires 1-3s later
+{indent}// when the translated message enters Postbox, wiping any new text the user typed.
+{indent}strongSelf.chatDisplayNode.historyNode.layoutActionOnViewTransition = nil"""
 
     content = content.replace(old_line, new_code, 1)
 
