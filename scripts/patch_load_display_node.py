@@ -70,7 +70,13 @@ def patch_load_display_node(filepath: str) -> None:
 {indent}        let _ = enqueueMessages(account: strongSelf.context.account, peerId: peerId, messages: [aiMsg]).start()
 {indent}    }}
 {indent}}}
-{indent}signal = .single([])"""
+{indent}signal = .single([])
+{indent}// AI Translation: clear text input immediately since messages are enqueued asynchronously.
+{indent}// setupSendActionOnViewUpdate() defers clearing until a Postbox view update, which won't
+{indent}// happen until translation completes (1-3s). Bypass it by clearing directly.
+{indent}if let textInputPanelNode = strongSelf.chatDisplayNode.inputPanelNode as? ChatTextInputPanelNode {{
+{indent}    textInputPanelNode.text = ""
+{indent}}}"""
 
     content = content.replace(old_line, new_code, 1)
 

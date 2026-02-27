@@ -63,30 +63,34 @@ else
     echo "    Done."
 fi
 
-# 4. Patch ChatController.swift for outgoing message interception
-echo "  [4/13] Patching ChatController.swift..."
-CHAT_CTRL="${TARGET_DIR}/submodules/TelegramUI/Sources/ChatController.swift"
-if grep -q "import AITranslation" "$CHAT_CTRL" 2>/dev/null; then
+# 4. Auto-enable incoming translation state in ChatControllerLoadDisplayNode
+echo "  [4/13] Enabling auto-incoming translation state..."
+LOAD_DISPLAY_NODE="${TARGET_DIR}/submodules/TelegramUI/Sources/Chat/ChatControllerLoadDisplayNode.swift"
+if grep -q "AI Translation: auto-enable incoming translation" "$LOAD_DISPLAY_NODE" 2>/dev/null; then
     echo "    Already patched, skipping."
 else
-    insert_after "$CHAT_CTRL" "import UIKit" "import AITranslation"
-
-    # Use Python for the more complex sendMessages modification
-    python3 "${SCRIPT_DIR}/patch_chat_controller.py" "$CHAT_CTRL"
+    # Add import first (needed for both this and step 5)
+    if ! grep -q "import AITranslation" "$LOAD_DISPLAY_NODE" 2>/dev/null; then
+        insert_after "$LOAD_DISPLAY_NODE" "import UIKit" "import AITranslation"
+    fi
+    python3 "${SCRIPT_DIR}/patch_incoming_translation.py" "$LOAD_DISPLAY_NODE"
     echo "    Done."
 fi
 
-# 4. Patch ChatControllerLoadDisplayNode.swift for main text input translation
-echo "  [5/13] Patching ChatControllerLoadDisplayNode.swift..."
-LOAD_DISPLAY_NODE="${TARGET_DIR}/submodules/TelegramUI/Sources/Chat/ChatControllerLoadDisplayNode.swift"
-if grep -q "import AITranslation" "$LOAD_DISPLAY_NODE" 2>/dev/null; then
+# 5. Patch ChatControllerLoadDisplayNode.swift for main text input translation (fire-and-forget)
+echo "  [5/13] Patching ChatControllerLoadDisplayNode.swift for outgoing translation..."
+if grep -q "AI Translation: fire-and-forget" "$LOAD_DISPLAY_NODE" 2>/dev/null; then
     echo "    Already patched, skipping."
 else
+    # import AITranslation should already be added by step 4, but ensure it
+    if ! grep -q "import AITranslation" "$LOAD_DISPLAY_NODE" 2>/dev/null; then
+        insert_after "$LOAD_DISPLAY_NODE" "import UIKit" "import AITranslation"
+    fi
     python3 "${SCRIPT_DIR}/patch_load_display_node.py" "$LOAD_DISPLAY_NODE"
     echo "    Done."
 fi
 
-# 5. Patch ChatHistoryListNode.swift for incoming translation
+# 6. Patch ChatHistoryListNode.swift for incoming translation
 echo "  [6/13] Patching ChatHistoryListNode.swift for incoming translation..."
 HISTORY_LIST_NODE="${TARGET_DIR}/submodules/TelegramUI/Sources/ChatHistoryListNode.swift"
 if grep -q "AI Translation: force-enable incoming" "$HISTORY_LIST_NODE" 2>/dev/null; then
@@ -96,7 +100,7 @@ else
     echo "    Done."
 fi
 
-# 6b. Reduce incoming translation throttle delay
+# 7. Reduce incoming translation throttle delay
 echo "  [7/13] Reducing translation throttle delay..."
 if grep -q "delay: 0.1" "$HISTORY_LIST_NODE" 2>/dev/null; then
     echo "    Already patched, skipping."
@@ -105,7 +109,7 @@ else
     echo "    Done."
 fi
 
-# 7. Patch PeerInfoScreen to add Translation Proxy settings entry
+# 8. Patch PeerInfoScreen to add Translation Proxy settings entry
 echo "  [8/13] Patching PeerInfoScreen for Translation Proxy settings..."
 PEERINFO="${TARGET_DIR}/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoScreen.swift"
 if grep -q "import AITranslation" "$PEERINFO" 2>/dev/null; then
@@ -115,7 +119,7 @@ else
     echo "    Done."
 fi
 
-# 7. Patch Translate.swift to always use our translation service
+# 9. Patch Translate.swift to always use our translation service
 echo "  [9/13] Patching Translate.swift for AI translation service..."
 TRANSLATE_SWIFT="${TARGET_DIR}/submodules/TelegramCore/Sources/TelegramEngine/Messages/Translate.swift"
 if ! grep -q "enableLocalIfPossible" "$TRANSLATE_SWIFT" 2>/dev/null; then
@@ -125,7 +129,7 @@ else
     echo "    Done."
 fi
 
-# 8. Patch ApplyUpdateMessage.swift to preserve TranslationMessageAttribute during server sync
+# 10. Patch ApplyUpdateMessage.swift to preserve TranslationMessageAttribute during server sync
 echo "  [10/13] Patching ApplyUpdateMessage.swift..."
 APPLY_UPDATE="${TARGET_DIR}/submodules/TelegramCore/Sources/State/ApplyUpdateMessage.swift"
 if grep -q "Preserve local TranslationMessageAttribute" "$APPLY_UPDATE" 2>/dev/null; then
@@ -135,7 +139,7 @@ else
     echo "    Done."
 fi
 
-# 9. Patch ChatMessageTextBubbleContentNode.swift for outgoing translation display
+# 11. Patch ChatMessageTextBubbleContentNode.swift for outgoing translation display
 echo "  [11/13] Patching ChatMessageTextBubbleContentNode.swift..."
 TEXT_BUBBLE="${TARGET_DIR}/submodules/TelegramUI/Components/Chat/ChatMessageTextBubbleContentNode/Sources/ChatMessageTextBubbleContentNode.swift"
 if grep -q "AI Translation: removed incoming guard" "$TEXT_BUBBLE" 2>/dev/null; then
@@ -145,7 +149,7 @@ else
     echo "    Done."
 fi
 
-# 9. Patch ChatListItemStrings.swift for translated chat list preview
+# 12. Patch ChatListItemStrings.swift for translated chat list preview
 echo "  [12/13] Patching ChatListItemStrings.swift..."
 CHAT_LIST_STRINGS="${TARGET_DIR}/submodules/ChatListUI/Sources/Node/ChatListItemStrings.swift"
 if grep -q "TranslationMessageAttribute" "$CHAT_LIST_STRINGS" 2>/dev/null; then
@@ -155,7 +159,7 @@ else
     echo "    Done."
 fi
 
-# 10. Apply any additional .patch files
+# 13. Apply any additional .patch files
 echo "  [13/13] Applying additional patch files..."
 PATCH_COUNT=0
 for patch_file in "${PATCHES_DIR}"/*.patch; do
