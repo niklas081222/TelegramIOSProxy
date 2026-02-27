@@ -28,6 +28,14 @@ def patch_copy_profiles(build_dir):
     before = content[:content.index(func_start)]
     after = content[content.index(func_end):]
 
+    # Also replace resolve_aps_environment_from_directory
+    func_end2 = "\ndef copy_certificates_from_directory("
+    if func_end2 not in content:
+        print(f"WARNING: Could not find copy_certificates_from_directory boundary")
+        return False
+
+    after = content[content.index(func_end2):]
+
     new_func_lines = [
         "def copy_profiles_from_directory(source_path, destination_path, team_id, bundle_id):",
         "    import glob",
@@ -36,6 +44,10 @@ def patch_copy_profiles(build_dir):
         "        dest_file = os.path.join(destination_path, file_name)",
         "        shutil.copyfile(file_path, dest_file)",
         "        print('Copied profile: {} -> {}'.format(file_name, dest_file))",
+        "",
+        "",
+        "def resolve_aps_environment_from_directory(source_path, team_id, bundle_id):",
+        '    return "development"',
         "",
     ]
     new_func = "\n".join(new_func_lines) + "\n"
@@ -172,37 +184,6 @@ def patch_remote_downloader(build_dir):
     return True
 
 
-def patch_aps_environment(build_dir):
-    """Default aps_environment to 'development' if provisioning profiles lack it.
-
-    The build system checks for aps-environment entitlement in provisioning
-    profiles and exits if not found. For debug builds, we can safely default
-    to 'development'.
-    """
-    make_path = os.path.join(build_dir, "build-system", "Make", "Make.py")
-
-    with open(make_path, "r") as f:
-        content = f.read()
-
-    original = content
-
-    # Use regex to capture indentation and insert default before the check
-    content = re.sub(
-        r'(\n)([ \t]*)(if codesigning_data\.aps_environment is None:)',
-        r'\1\2codesigning_data.aps_environment = codesigning_data.aps_environment or "development"\n\2if False:  # aps_environment defaulted above',
-        content,
-        count=1,
-    )
-
-    if content != original:
-        with open(make_path, "w") as f:
-            f.write(content)
-        print(f"[5] Patched aps_environment default in {make_path}")
-    else:
-        print(f"[5] aps_environment check not found or already patched in {make_path}")
-
-    return True
-
 
 def main():
     if len(sys.argv) < 2:
@@ -219,7 +200,6 @@ def main():
     patch_swift_copts(build_dir)
     patch_bazelrc_action_env(build_dir)
     patch_remote_downloader(build_dir)
-    patch_aps_environment(build_dir)
 
 
 if __name__ == "__main__":
