@@ -186,12 +186,13 @@ def patch_aps_environment(build_dir):
 
     original = content
 
-    # Insert a default assignment right before the None check
-    old = "if codesigning_data.aps_environment is None:"
-    new = 'codesigning_data.aps_environment = codesigning_data.aps_environment or "development"\n' \
-          '        if codesigning_data.aps_environment is None:'
-
-    content = content.replace(old, new, 1)
+    # Use regex to capture indentation and insert default before the check
+    content = re.sub(
+        r'(\n)([ \t]*)(if codesigning_data\.aps_environment is None:)',
+        r'\1\2codesigning_data.aps_environment = codesigning_data.aps_environment or "development"\n\2if False:  # aps_environment defaulted above',
+        content,
+        count=1,
+    )
 
     if content != original:
         with open(make_path, "w") as f:
