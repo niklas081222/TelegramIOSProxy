@@ -34,7 +34,7 @@ def patch_hide_translation_bar(filepath: str) -> None:
     # Replace with an empty else block — the panel is never added to headerPanels
     new = """    } else {
                 // AI Translation: hide translation bar (keep translationState for data pipeline)
-                let _ = hasTranslationPanel
+                hasTranslationPanel = false
             }
         }"""
 
