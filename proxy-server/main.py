@@ -432,12 +432,12 @@ async def translate_batch(request: BatchTranslateRequest):
             chat_id=item.chat_id,
         )
         resp = await translation_service.translate(req)
-            return BatchResultItem(
-                id=item.id,
-                translated_text=resp.translated_text,
-                original_text=resp.original_text,
-                translation_failed=resp.translation_failed,
-            )
+        return BatchResultItem(
+            id=item.id,
+            translated_text=resp.translated_text,
+            original_text=resp.original_text,
+            translation_failed=resp.translation_failed,
+        )
 
     results = await asyncio.gather(*(translate_one(item) for item in request.texts))
     return BatchTranslateResponse(results=list(results))

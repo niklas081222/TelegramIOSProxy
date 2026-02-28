@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
-"""Patch ChatControllerLoadDisplayNode.swift to auto-enable incoming translation.
+"""Patch ChatControllerLoadDisplayNode.swift to trigger catch-up translation on chat open.
 
-Telegram's built-in translation requires the user to manually tap the "Translate"
-banner. This patch auto-sets translationState to enabled (fromLang: "de", toLang: "en")
-when our AI translation is active, triggering Telegram's built-in pipeline which calls
-our AIExperimentalTranslationService.
+When a chat is opened, this patch triggers AIBackgroundTranslationObserver.translateMessages()
+to stream-translate any messages missing a TranslationMessageAttribute (newest first).
 
-Also kicks off catch-up translation for any messages that don't have a
-TranslationMessageAttribute yet (pre-translates them via background observer).
+Does NOT set translationState — Telegram's built-in batch pipeline is intentionally
+bypassed. All translations go through our streaming catch-up exclusively.
 """
 import sys
 import re
@@ -29,27 +27,10 @@ def patch_incoming_translation(filepath: str) -> None:
 
     override_code = """presentationInterfaceState = presentationInterfaceState.updatedTranslationState(contentData.state.translationState)
 
-            // AI Translation: auto-enable incoming translation when our service is active
+            // AI Translation: catch-up translate on chat open (streaming, newest first)
             if AITranslationSettings.enabled && AITranslationSettings.autoTranslateIncoming {
-                let existingState = presentationInterfaceState.translationState
-                if existingState == nil || existingState?.isEnabled != true {
-                    presentationInterfaceState = presentationInterfaceState.updatedTranslationState(
-                        ChatPresentationTranslationState(isEnabled: true, fromLang: "de", toLang: "en")
-                    )
-                    // Async dispatch to ensure the translation pipeline is triggered
-                    // Setting state during content data observation doesn't fire presentationInterfaceStateUpdated
-                    DispatchQueue.main.async { [weak self] in
-                        guard let self else { return }
-                        self.updateChatPresentationInterfaceState(interactive: false) { state in
-                            return state.updatedTranslationState(
-                                ChatPresentationTranslationState(isEnabled: true, fromLang: "de", toLang: "en")
-                            )
-                        }
-                    }
-                    // AI Translation: catch-up translate recent messages that are missing translations
-                    if case let .peer(chatPeerId) = self.chatLocation {
-                        AIBackgroundTranslationObserver.translateMessages(peerId: chatPeerId, context: self.context)
-                    }
+                if case let .peer(chatPeerId) = self.chatLocation {
+                    AIBackgroundTranslationObserver.translateMessages(peerId: chatPeerId, context: self.context)
                 }
             }"""
 

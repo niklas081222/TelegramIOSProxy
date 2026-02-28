@@ -14,11 +14,10 @@ public final class AIExperimentalTranslationService: ExperimentalInternalTransla
         fromLang: String,
         toLang: String
     ) -> Signal<[AnyHashable: String]?, NoError> {
-        return AITranslationService.shared.translateTexts(
-            texts: texts,
-            fromLang: fromLang,
-            toLang: toLang
-        )
+        // No-op: return empty success to prevent Telegram's batch pipeline from
+        // actually translating. Our streaming catch-up handles all translations.
+        // Returning [:] (not nil) prevents Telegram from falling back to cloud translation.
+        return .single([:])
     }
 }
 
