@@ -316,20 +316,21 @@ public final class AIBackgroundTranslationObserver {
 
     // MARK: - Catch-Up Translation
 
-    /// Scan recent messages in a chat and translate any incoming messages
-    /// that don't have a TranslationMessageAttribute yet.
+    /// Scan recent messages in a chat and translate ALL messages (both incoming
+    /// and the user's own outgoing) that don't have a TranslationMessageAttribute yet.
+    /// All messages use the Incoming System Prompt (DE → EN) since own messages are
+    /// already stored in German on the server after outgoing translation.
     /// Call this when a chat opens to catch up on untranslated messages.
     public static func translateMessages(peerId: PeerId, context: AccountContext) {
         guard AITranslationSettings.enabled, AITranslationSettings.autoTranslateIncoming else { return }
 
-        let accountPeerId = context.account.peerId
         let useContext = AITranslationSettings.incomingContextMode == 2
 
         let _ = (context.account.postbox.transaction { transaction -> [(MessageId, String)] in
             var toTranslate: [(MessageId, String)] = []
             transaction.scanTopMessages(peerId: peerId, namespace: Namespaces.Message.Cloud, limit: 100) { message in
-                if message.author?.id != accountPeerId,
-                   !message.text.isEmpty,
+                // Include ALL messages (both incoming and own) for batch translation on chat open
+                if !message.text.isEmpty,
                    !message.attributes.contains(where: { $0 is TranslationMessageAttribute }) {
                     toTranslate.append((message.id, message.text))
                 }
