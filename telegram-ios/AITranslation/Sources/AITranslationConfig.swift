@@ -58,6 +58,14 @@ public struct AITranslationSettings {
     @AIStorage(key: "ai_translation:context_count", defaultValue: 20)
     public static var contextMessageCount: Int
 
+    // Incoming context mode: 1 = single message (no context), 2 = conversation context
+    @AIStorage(key: "ai_translation:incoming_context_mode", defaultValue: 1)
+    public static var incomingContextMode: Int
+
+    // Number of context messages for incoming translation (when mode == 2)
+    @AIStorage(key: "ai_translation:incoming_context_count", defaultValue: 20)
+    public static var incomingContextMessageCount: Int
+
     // Dev settings
     @AIStorage(key: "ai_translation:show_raw_responses", defaultValue: false)
     public static var showRawAPIResponses: Bool

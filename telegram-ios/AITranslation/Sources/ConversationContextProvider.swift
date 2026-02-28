@@ -10,12 +10,24 @@ public final class ConversationContextProvider {
     public static func getContext(
         chatId: PeerId,
         context: AccountContext,
-        limit: Int? = nil
+        limit: Int? = nil,
+        direction: String = "outgoing"
     ) -> Signal<[AIContextMessage], NoError> {
-        let messageCount = limit ?? AITranslationSettings.contextMessageCount
+        let contextMode: Int
+        let defaultCount: Int
+
+        if direction == "incoming" {
+            contextMode = AITranslationSettings.incomingContextMode
+            defaultCount = AITranslationSettings.incomingContextMessageCount
+        } else {
+            contextMode = AITranslationSettings.contextMode
+            defaultCount = AITranslationSettings.contextMessageCount
+        }
+
+        let messageCount = limit ?? defaultCount
 
         // If context mode is single message, return empty context
-        if AITranslationSettings.contextMode == 1 {
+        if contextMode == 1 {
             return .single([])
         }
 

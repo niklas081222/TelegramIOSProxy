@@ -34,6 +34,8 @@ private enum AISettingsEntry: ItemListNodeEntry {
     case devHeader(String)
     case contextMode(String, Int)
     case contextCount(String, Int)
+    case incomingContextMode(String, Int)
+    case incomingContextCount(String, Int)
     case showRawResponses(String, Bool)
 
     case cacheHeader(String)
@@ -49,7 +51,7 @@ private enum AISettingsEntry: ItemListNodeEntry {
             return AISettingsSection.connection.rawValue
         case .translationHeader, .globalToggle, .incomingToggle, .outgoingToggle:
             return AISettingsSection.translation.rawValue
-        case .devHeader, .contextMode, .contextCount, .showRawResponses:
+        case .devHeader, .contextMode, .contextCount, .incomingContextMode, .incomingContextCount, .showRawResponses:
             return AISettingsSection.devSettings.rawValue
         case .cacheHeader, .clearCache:
             return AISettingsSection.cache.rawValue
@@ -71,7 +73,9 @@ private enum AISettingsEntry: ItemListNodeEntry {
         case .devHeader: return 20
         case .contextMode: return 21
         case .contextCount: return 22
-        case .showRawResponses: return 23
+        case .incomingContextMode: return 24
+        case .incomingContextCount: return 25
+        case .showRawResponses: return 26
         case .cacheHeader: return 30
         case .clearCache: return 31
         case .promptHeader: return 40
@@ -107,6 +111,10 @@ private enum AISettingsEntry: ItemListNodeEntry {
         case let (.contextMode(a1, a2), .contextMode(b1, b2)):
             return a1 == b1 && a2 == b2
         case let (.contextCount(a1, a2), .contextCount(b1, b2)):
+            return a1 == b1 && a2 == b2
+        case let (.incomingContextMode(a1, a2), .incomingContextMode(b1, b2)):
+            return a1 == b1 && a2 == b2
+        case let (.incomingContextCount(a1, a2), .incomingContextCount(b1, b2)):
             return a1 == b1 && a2 == b2
         case let (.showRawResponses(a1, a2), .showRawResponses(b1, b2)):
             return a1 == b1 && a2 == b2
@@ -230,6 +238,26 @@ private enum AISettingsEntry: ItemListNodeEntry {
                 action: { arguments.editContextCount() }
             )
 
+        case let .incomingContextMode(title, mode):
+            return ItemListDisclosureItem(
+                presentationData: presentationData,
+                title: title,
+                label: mode == 1 ? "Single Message" : "Conversation Context",
+                sectionId: self.section,
+                style: .blocks,
+                action: { arguments.toggleIncomingContextMode() }
+            )
+
+        case let .incomingContextCount(title, count):
+            return ItemListDisclosureItem(
+                presentationData: presentationData,
+                title: title,
+                label: "\(count) messages",
+                sectionId: self.section,
+                style: .blocks,
+                action: { arguments.editIncomingContextCount() }
+            )
+
         case let .showRawResponses(title, value):
             return ItemListSwitchItem(
                 presentationData: presentationData,
@@ -300,6 +328,8 @@ private final class AISettingsArguments {
     let toggleOutgoing: (Bool) -> Void
     let toggleContextMode: () -> Void
     let editContextCount: () -> Void
+    let toggleIncomingContextMode: () -> Void
+    let editIncomingContextCount: () -> Void
     let toggleShowRaw: (Bool) -> Void
     let clearCache: () -> Void
     let openPromptEditor: (String) -> Void
@@ -312,6 +342,8 @@ private final class AISettingsArguments {
         toggleOutgoing: @escaping (Bool) -> Void,
         toggleContextMode: @escaping () -> Void,
         editContextCount: @escaping () -> Void,
+        toggleIncomingContextMode: @escaping () -> Void,
+        editIncomingContextCount: @escaping () -> Void,
         toggleShowRaw: @escaping (Bool) -> Void,
         clearCache: @escaping () -> Void,
         openPromptEditor: @escaping (String) -> Void
@@ -323,6 +355,8 @@ private final class AISettingsArguments {
         self.toggleOutgoing = toggleOutgoing
         self.toggleContextMode = toggleContextMode
         self.editContextCount = editContextCount
+        self.toggleIncomingContextMode = toggleIncomingContextMode
+        self.editIncomingContextCount = editIncomingContextCount
         self.toggleShowRaw = toggleShowRaw
         self.clearCache = clearCache
         self.openPromptEditor = openPromptEditor
@@ -359,7 +393,11 @@ private func aiSettingsEntries(state: AISettingsState) -> [AISettingsEntry] {
     entries.append(.devHeader("DEVELOPER SETTINGS"))
     entries.append(.contextMode("Outgoing Context", AITranslationSettings.contextMode))
     if AITranslationSettings.contextMode == 2 {
-        entries.append(.contextCount("Context Messages", AITranslationSettings.contextMessageCount))
+        entries.append(.contextCount("Outgoing Context Messages", AITranslationSettings.contextMessageCount))
+    }
+    entries.append(.incomingContextMode("Incoming Context", AITranslationSettings.incomingContextMode))
+    if AITranslationSettings.incomingContextMode == 2 {
+        entries.append(.incomingContextCount("Incoming Context Messages", AITranslationSettings.incomingContextMessageCount))
     }
     entries.append(.showRawResponses("Show Raw API Responses", AITranslationSettings.showRawAPIResponses))
 
@@ -454,10 +492,70 @@ public func aiSettingsController(context: AccountContext) -> ViewController {
         },
         editContextCount: {
             let current = AITranslationSettings.contextMessageCount
-            let options = [5, 10, 20, 50, 100]
-            let nextIndex = (options.firstIndex(where: { $0 > current }) ?? 0)
-            AITranslationSettings.contextMessageCount = options[nextIndex]
+            let alert = UIAlertController(
+                title: "Context Messages",
+                message: "Enter the number of recent messages to include as context",
+                preferredStyle: .alert
+            )
+            alert.addTextField { textField in
+                textField.text = "\(current)"
+                textField.keyboardType = .numberPad
+                textField.placeholder = "e.g. 20"
+            }
+            alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+            alert.addAction(UIAlertAction(title: "Save", style: .default) { _ in
+                guard let text = alert.textFields?.first?.text,
+                      let value = Int(text),
+                      value > 0 else {
+                    let errorAlert = UIAlertController(
+                        title: "Invalid Input",
+                        message: "Please enter a positive number",
+                        preferredStyle: .alert
+                    )
+                    errorAlert.addAction(UIAlertAction(title: "OK", style: .default))
+                    context.sharedContext.mainWindow?.presentNative(errorAlert)
+                    return
+                }
+                AITranslationSettings.contextMessageCount = value
+                bumpRevision()
+            })
+            context.sharedContext.mainWindow?.presentNative(alert)
+        },
+        toggleIncomingContextMode: {
+            let newMode = AITranslationSettings.incomingContextMode == 1 ? 2 : 1
+            AITranslationSettings.incomingContextMode = newMode
             bumpRevision()
+        },
+        editIncomingContextCount: {
+            let current = AITranslationSettings.incomingContextMessageCount
+            let alert = UIAlertController(
+                title: "Incoming Context Messages",
+                message: "Enter the number of recent messages to include as context for incoming translations",
+                preferredStyle: .alert
+            )
+            alert.addTextField { textField in
+                textField.text = "\(current)"
+                textField.keyboardType = .numberPad
+                textField.placeholder = "e.g. 20"
+            }
+            alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+            alert.addAction(UIAlertAction(title: "Save", style: .default) { _ in
+                guard let text = alert.textFields?.first?.text,
+                      let value = Int(text),
+                      value > 0 else {
+                    let errorAlert = UIAlertController(
+                        title: "Invalid Input",
+                        message: "Please enter a positive number",
+                        preferredStyle: .alert
+                    )
+                    errorAlert.addAction(UIAlertAction(title: "OK", style: .default))
+                    context.sharedContext.mainWindow?.presentNative(errorAlert)
+                    return
+                }
+                AITranslationSettings.incomingContextMessageCount = value
+                bumpRevision()
+            })
+            context.sharedContext.mainWindow?.presentNative(alert)
         },
         toggleShowRaw: { value in
             AITranslationSettings.showRawAPIResponses = value

@@ -80,17 +80,47 @@ public final class AITranslationService {
             return .single(text)
         }
 
-        // Incoming: always translate individually, no conversation context
-        return client.translate(
-            text: text,
-            direction: "incoming",
-            chatId: chatId.id._internalGetInt64Value(),
-            context: []
-        )
+        let contextSignal: Signal<[AIContextMessage], NoError>
+        if AITranslationSettings.incomingContextMode == 2 {
+            contextSignal = ConversationContextProvider.getContext(
+                chatId: chatId,
+                context: context,
+                direction: "incoming"
+            )
+        } else {
+            contextSignal = .single([])
+        }
+
+        return contextSignal
+        |> mapToSignal { contextMessages -> Signal<String, NoError> in
+            return client.translate(
+                text: text,
+                direction: "incoming",
+                chatId: chatId.id._internalGetInt64Value(),
+                context: contextMessages
+            )
+        }
         |> map { [weak self] translatedText -> String in
             self?.cache.set(messageId, translation: translatedText)
             return translatedText
         }
+    }
+
+    /// Translates a single incoming message with conversation context (used by background observer).
+    public func translateIncomingWithContext(
+        text: String,
+        chatId: PeerId,
+        context: [AIContextMessage]
+    ) -> Signal<String, NoError> {
+        guard let client = proxyClient else {
+            return .single(text)
+        }
+        return client.translate(
+            text: text,
+            direction: "incoming",
+            chatId: chatId.id._internalGetInt64Value(),
+            context: context
+        )
     }
 
     // MARK: - Batch Translation for ExperimentalInternalTranslationService
@@ -126,17 +156,18 @@ public final class AITranslationService {
         return client.translateBatch(items: batchItems)
         |> map { results -> [AnyHashable: String]? in
             if results.isEmpty && !texts.isEmpty {
-                // Batch endpoint failed, return originals
-                return texts
+                // Batch endpoint failed entirely, return nil to signal failure
+                return nil
             }
             var dict: [AnyHashable: String] = [:]
             for result in results {
-                if let key = keyMap[result.id] {
-                    dict[key] = result.translationFailed ? texts[key] ?? result.originalText : result.translatedText
+                if let key = keyMap[result.id], !result.translationFailed {
+                    dict[key] = result.translatedText
                 }
             }
-            // If mapping failed and dict is empty, return originals as fallback
-            return dict.isEmpty && !texts.isEmpty ? texts : dict
+            // Return whatever succeeded; missing keys = failed translations
+            // Return nil if nothing succeeded so callers know it all failed
+            return dict.isEmpty ? nil : dict
         }
     }
 
