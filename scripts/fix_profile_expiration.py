@@ -38,6 +38,7 @@ BUNDLE_ID = 'com.niklas.translategram'
 PROVISIONED_DEVICES = [
     '80dccdbc6d929e5c1dabf7208465a6532728614b',   # Tim's iPhone
     '00008030-00165014346B402E',                    # iPhone 11
+    'cb3e3ebfa10b4aebbdb900c6a65bdd4209687f92',    # iPhone 8
 ]
 
 
