@@ -276,7 +276,7 @@ public final class AIBackgroundTranslationObserver {
                 direction: "incoming"
             )
             |> mapToSignal { contextMessages -> Signal<Void, NoError> in
-                let translateSignals: [Signal<(MessageId, String, String)?, NoError>] = chatMessages.map { (msgId, text) in
+                let translateSignals: [Signal<(MessageId, String)?, NoError>] = chatMessages.map { (msgId, text) in
                     return AITranslationService.shared.translateIncomingWithContext(
                         text: text,
                         chatId: peerId,
