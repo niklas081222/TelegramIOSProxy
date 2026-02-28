@@ -20,6 +20,11 @@ public final class AIBackgroundTranslationObserver {
     /// Retry delays in seconds for failed translations
     private static let retryDelays: [Double] = [2.0, 5.0, 10.0]
 
+    /// Track message IDs currently being translated to prevent duplicate requests
+    private static var inFlightMessageIds = Set<MessageId>()
+    /// Track per-peer catch-up to prevent duplicate translateMessages calls
+    private static var catchUpInProgress = Set<PeerId>()
+
     /// Call once when an authorized account is available.
     public static func startIfNeeded(context: AccountContext) {
         guard shared == nil else { return }
@@ -42,12 +47,16 @@ public final class AIBackgroundTranslationObserver {
         guard let context = storedContext else { return }
         guard !ids.isEmpty else { return }
 
+        // Skip IDs already in-flight
+        let newIds = ids.filter { !inFlightMessageIds.contains($0) }
+        guard !newIds.isEmpty else { return }
+
         let accountPeerId = context.account.peerId
         let startTs = appStartTimestamp
 
         let _ = (context.account.postbox.transaction { transaction -> [(MessageId, String, PeerId)] in
             var toTranslate: [(MessageId, String, PeerId)] = []
-            for id in ids {
+            for id in newIds {
                 guard let message = transaction.getMessage(id) else { continue }
                 // Only translate: incoming, recent (within 5 min of app start), non-empty, not already translated
                 if message.author?.id != accountPeerId,
@@ -62,6 +71,11 @@ public final class AIBackgroundTranslationObserver {
         |> deliverOnMainQueue
         |> mapToSignal { toTranslate -> Signal<Void, NoError> in
             guard !toTranslate.isEmpty else { return .complete() }
+
+            // Mark as in-flight
+            for (msgId, _, _) in toTranslate {
+                Self.inFlightMessageIds.insert(msgId)
+            }
 
             if AITranslationSettings.incomingContextMode == 2 {
                 return Self.translateWithContext(messages: toTranslate, context: context)
@@ -84,8 +98,15 @@ public final class AIBackgroundTranslationObserver {
 
         return AITranslationService.shared.translateTexts(texts: textDict, fromLang: "de", toLang: "en")
         |> mapToSignal { results -> Signal<Void, NoError> in
+            // Clear in-flight tracking
+            DispatchQueue.main.async {
+                for (msgId, _, _) in messages {
+                    Self.inFlightMessageIds.remove(msgId)
+                }
+            }
+
             guard let results = results else {
-                // All failed, schedule retry
+                // All failed (network error / timeout), schedule retry
                 print("[AITranslation] Batch translation returned nil, scheduling retry for \(messages.count) messages")
                 Self.scheduleRetry(ids: messages.map { $0.0 }, attempt: 0, context: context)
                 return .complete()
@@ -94,13 +115,8 @@ public final class AIBackgroundTranslationObserver {
                 var failedIds: [MessageId] = []
                 for (key, msgId) in idMap {
                     if let translatedText = results[key as AnyHashable] {
-                        // Safety: skip if translated text is identical to original
-                        let originalText = textDict[key as AnyHashable]
-                        if let orig = originalText, translatedText == orig {
-                            print("[AITranslation] Skipping storage for \(msgId): translation identical to original")
-                            failedIds.append(msgId)
-                            continue
-                        }
+                        // Store translation even if identical to original (message was already
+                        // in target language). This prevents infinite re-translation loops.
                         Self.storeTranslation(transaction: transaction, msgId: msgId, translatedText: translatedText)
                     } else {
                         failedIds.append(msgId)
@@ -135,41 +151,28 @@ public final class AIBackgroundTranslationObserver {
             )
             |> mapToSignal { contextMessages -> Signal<Void, NoError> in
                 // Translate each message individually with context
-                let translateSignals: [Signal<(MessageId, String, String)?, NoError>] = chatMessages.map { (msgId, text) in
+                let translateSignals: [Signal<(MessageId, String)?, NoError>] = chatMessages.map { (msgId, text) in
                     return AITranslationService.shared.translateIncomingWithContext(
                         text: text,
                         chatId: peerId,
                         context: contextMessages
                     )
-                    |> map { translatedText -> (MessageId, String, String)? in
-                        if translatedText == text {
-                            return nil  // Translation failed
-                        }
-                        return (msgId, text, translatedText)
+                    |> map { translatedText -> (MessageId, String)? in
+                        // Always return result, even if identical — store to prevent re-translation
+                        return (msgId, translatedText)
                     }
                 }
 
                 return combineLatest(translateSignals)
                 |> mapToSignal { results -> Signal<Void, NoError> in
                     let succeeded = results.compactMap { $0 }
-                    let failedIds = chatMessages.compactMap { (msgId, _) -> MessageId? in
-                        if succeeded.contains(where: { $0.0 == msgId }) { return nil }
-                        return msgId
-                    }
 
                     let storeSignal: Signal<Void, NoError> = succeeded.isEmpty ? .complete() :
                         context.account.postbox.transaction { transaction in
-                            for (msgId, _, translatedText) in succeeded {
+                            for (msgId, translatedText) in succeeded {
                                 Self.storeTranslation(transaction: transaction, msgId: msgId, translatedText: translatedText)
                             }
                         } |> map { _ in }
-
-                    if !failedIds.isEmpty {
-                        print("[AITranslation] \(failedIds.count) context translations failed, scheduling retry")
-                        DispatchQueue.main.async {
-                            Self.scheduleRetry(ids: failedIds, attempt: 0, context: context)
-                        }
-                    }
 
                     return storeSignal
                 }
@@ -238,11 +241,7 @@ public final class AIBackgroundTranslationObserver {
                 var stillFailed: [MessageId] = []
                 for (key, msgId) in idMap {
                     if let translatedText = results[key as AnyHashable] {
-                        let originalText = textDict[key as AnyHashable]
-                        if let orig = originalText, translatedText == orig {
-                            stillFailed.append(msgId)
-                            continue
-                        }
+                        // Store even if identical to original — prevents re-translation loops
                         Self.storeTranslation(transaction: transaction, msgId: msgId, translatedText: translatedText)
                     } else {
                         stillFailed.append(msgId)
@@ -278,32 +277,21 @@ public final class AIBackgroundTranslationObserver {
                         chatId: peerId,
                         context: contextMessages
                     )
-                    |> map { translatedText -> (MessageId, String, String)? in
-                        if translatedText == text { return nil }
-                        return (msgId, text, translatedText)
+                    |> map { translatedText -> (MessageId, String)? in
+                        return (msgId, translatedText)
                     }
                 }
 
                 return combineLatest(translateSignals)
                 |> mapToSignal { results -> Signal<Void, NoError> in
                     let succeeded = results.compactMap { $0 }
-                    let failedIds = chatMessages.compactMap { (msgId, _) -> MessageId? in
-                        if succeeded.contains(where: { $0.0 == msgId }) { return nil }
-                        return msgId
-                    }
 
                     let storeSignal: Signal<Void, NoError> = succeeded.isEmpty ? .complete() :
                         context.account.postbox.transaction { transaction in
-                            for (msgId, _, translatedText) in succeeded {
+                            for (msgId, translatedText) in succeeded {
                                 Self.storeTranslation(transaction: transaction, msgId: msgId, translatedText: translatedText)
                             }
                         } |> map { _ in }
-
-                    if !failedIds.isEmpty {
-                        DispatchQueue.main.async {
-                            Self.scheduleRetry(ids: failedIds, attempt: attempt + 1, context: context)
-                        }
-                    }
 
                     return storeSignal
                 }
@@ -324,6 +312,13 @@ public final class AIBackgroundTranslationObserver {
     public static func translateMessages(peerId: PeerId, context: AccountContext) {
         guard AITranslationSettings.enabled, AITranslationSettings.autoTranslateIncoming else { return }
 
+        // Prevent duplicate catch-up for the same chat
+        guard !catchUpInProgress.contains(peerId) else {
+            print("[AITranslation] Catch-up already in progress for \(peerId), skipping")
+            return
+        }
+        catchUpInProgress.insert(peerId)
+
         let useContext = AITranslationSettings.incomingContextMode == 2
 
         let _ = (context.account.postbox.transaction { transaction -> [(MessageId, String)] in
@@ -331,7 +326,8 @@ public final class AIBackgroundTranslationObserver {
             transaction.scanTopMessages(peerId: peerId, namespace: Namespaces.Message.Cloud, limit: 100) { message in
                 // Include ALL messages (both incoming and own) for batch translation on chat open
                 if !message.text.isEmpty,
-                   !message.attributes.contains(where: { $0 is TranslationMessageAttribute }) {
+                   !message.attributes.contains(where: { $0 is TranslationMessageAttribute }),
+                   !Self.inFlightMessageIds.contains(message.id) {
                     toTranslate.append((message.id, message.text))
                 }
                 return true
@@ -340,11 +336,29 @@ public final class AIBackgroundTranslationObserver {
         }
         |> deliverOnMainQueue
         |> mapToSignal { toTranslate -> Signal<Void, NoError> in
-            guard !toTranslate.isEmpty else { return .complete() }
+            guard !toTranslate.isEmpty else {
+                Self.catchUpInProgress.remove(peerId)
+                return .complete()
+            }
+
+            print("[AITranslation] Catch-up: translating \(toTranslate.count) messages for \(peerId)")
+
+            // Mark all as in-flight
+            for (msgId, _) in toTranslate {
+                Self.inFlightMessageIds.insert(msgId)
+            }
 
             if useContext {
                 let messages = toTranslate.map { ($0.0, $0.1, peerId) }
                 return Self.translateWithContext(messages: messages, context: context)
+                |> afterCompleted {
+                    DispatchQueue.main.async {
+                        Self.catchUpInProgress.remove(peerId)
+                        for (msgId, _) in toTranslate {
+                            Self.inFlightMessageIds.remove(msgId)
+                        }
+                    }
+                }
             } else {
                 var textDict: [AnyHashable: String] = [:]
                 var idMap: [String: MessageId] = [:]
@@ -356,14 +370,19 @@ public final class AIBackgroundTranslationObserver {
 
                 return AITranslationService.shared.translateTexts(texts: textDict, fromLang: "de", toLang: "en")
                 |> mapToSignal { results -> Signal<Void, NoError> in
+                    // Clear in-flight and catch-up tracking
+                    DispatchQueue.main.async {
+                        Self.catchUpInProgress.remove(peerId)
+                        for (msgId, _) in toTranslate {
+                            Self.inFlightMessageIds.remove(msgId)
+                        }
+                    }
+
                     guard let results = results else { return .complete() }
                     return context.account.postbox.transaction { transaction in
                         for (key, translatedText) in results {
                             guard let k = key as? String, let msgId = idMap[k] else { continue }
-                            let originalText = textDict[k as AnyHashable]
-                            if let orig = originalText, translatedText == orig {
-                                continue
-                            }
+                            // Store translation even if identical to original to prevent re-translation
                             Self.storeTranslation(transaction: transaction, msgId: msgId, translatedText: translatedText)
                         }
                     } |> map { _ in }
@@ -388,8 +407,10 @@ public final class AIBackgroundTranslationObserver {
                 for message in messages {
                     guard message.author?.id != accountPeerId,
                           !message.text.isEmpty,
-                          !message.attributes.contains(where: { $0 is TranslationMessageAttribute })
+                          !message.attributes.contains(where: { $0 is TranslationMessageAttribute }),
+                          !Self.inFlightMessageIds.contains(message.id)
                     else { continue }
+                    Self.inFlightMessageIds.insert(message.id)
                     toTranslate.append((message.id, message.text, message.id.peerId))
                 }
                 guard !toTranslate.isEmpty else { continue }

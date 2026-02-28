@@ -6,7 +6,8 @@ from pathlib import Path
 from typing import Optional
 
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from pydantic import BaseModel, Field
 
 # --- Configuration ---
@@ -32,11 +33,18 @@ PORT = config.get("port", 8080)
 logger = logging.getLogger("translation-proxy")
 logger.setLevel(logging.INFO)
 
-file_handler = logging.FileHandler(Path(__file__).parent / LOG_FILE)
+file_handler = logging.FileHandler(Path(__file__).parent / LOG_FILE, encoding="utf-8")
 file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
 logger.addHandler(file_handler)
 
-stream_handler = logging.StreamHandler()
+import sys, io
+# Force UTF-8 on stdout/stderr so emoji don't crash the Windows cp1252 console
+if sys.stdout.encoding != "utf-8":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+if sys.stderr.encoding != "utf-8":
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+
+stream_handler = logging.StreamHandler(stream=sys.stdout)
 stream_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
 logger.addHandler(stream_handler)
 
@@ -232,6 +240,13 @@ class TranslationService:
             request.text, request.direction, request.context, system_prompt
         )
 
+        # Verbose logging: full prompt sent to AI
+        logger.info(f"===== REQUEST chat_id={request.chat_id} direction={request.direction} context_count={len(request.context)} =====")
+        for i, msg in enumerate(messages):
+            logger.info(f"  MESSAGE[{i}] role={msg['role']}:")
+            for line in msg['content'].splitlines():
+                logger.info(f"    | {line}")
+
         translated_text = None
         translation_failed = False
 
@@ -259,6 +274,13 @@ class TranslationService:
             f"text_len={len(request.text)} response_time_ms={elapsed_ms:.0f} "
             f"failed={translation_failed}"
         )
+        # Verbose logging: full AI response
+        logger.info(f"===== RESPONSE chat_id={request.chat_id} =====")
+        logger.info(f"  ORIGINAL: {request.text}")
+        logger.info(f"  TRANSLATED: {translated_text}")
+        logger.info(f"  FAILED: {translation_failed}")
+        logger.info(f"===== END =====")
+
 
         return TranslateResponse(
             translated_text=translated_text,
@@ -390,10 +412,17 @@ async def translate(request: TranslateRequest):
     return await translation_service.translate(request)
 
 
+# Limit concurrent OpenRouter API calls to prevent overwhelming the API
+# Must be high enough that a 100-item batch finishes within iOS's 30s timeout
+_translate_semaphore = asyncio.Semaphore(25)
+
+
 @app.post("/translate/batch", response_model=BatchTranslateResponse)
 async def translate_batch(request: BatchTranslateRequest):
     if not request.texts:
         return BatchTranslateResponse(results=[])
+
+    logger.info(f"Batch request: {len(request.texts)} items")
 
     async def translate_one(item: BatchTextItem) -> BatchResultItem:
         if not item.text.strip():
@@ -402,18 +431,19 @@ async def translate_batch(request: BatchTranslateRequest):
                 translated_text=item.text,
                 original_text=item.text,
             )
-        req = TranslateRequest(
-            text=item.text,
-            direction=item.direction,
-            chat_id=item.chat_id,
-        )
-        resp = await translation_service.translate(req)
-        return BatchResultItem(
-            id=item.id,
-            translated_text=resp.translated_text,
-            original_text=resp.original_text,
-            translation_failed=resp.translation_failed,
-        )
+        async with _translate_semaphore:
+            req = TranslateRequest(
+                text=item.text,
+                direction=item.direction,
+                chat_id=item.chat_id,
+            )
+            resp = await translation_service.translate(req)
+            return BatchResultItem(
+                id=item.id,
+                translated_text=resp.translated_text,
+                original_text=resp.original_text,
+                translation_failed=resp.translation_failed,
+            )
 
     results = await asyncio.gather(*(translate_one(item) for item in request.texts))
     return BatchTranslateResponse(results=list(results))
@@ -494,6 +524,90 @@ async def stats():
         "success_rate": round(s["successful"] / total, 4) if total > 0 else 0,
         "avg_response_time_ms": round(avg_ms, 1),
     }
+
+
+# --- OTA Install ---
+
+OTA_DIR = Path(__file__).parent / "ota"
+OTA_BUNDLE_ID = "com.niklas.translategram"
+OTA_APP_TITLE = "TranslateGram"
+OTA_BUNDLE_VERSION = "11.13"
+
+
+@app.get("/ota/app.ipa")
+async def ota_ipa():
+    ipa_path = OTA_DIR / "app.ipa"
+    if not ipa_path.exists():
+        raise HTTPException(status_code=404, detail="IPA not found")
+    return FileResponse(ipa_path, media_type="application/octet-stream", filename="TranslateGram.ipa")
+
+
+@app.get("/ota/manifest.plist")
+async def ota_manifest(request: Request):
+    base_url = str(request.base_url).rstrip("/")
+    ipa_url = f"{base_url}/ota/app.ipa"
+    manifest = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>items</key>
+    <array>
+        <dict>
+            <key>assets</key>
+            <array>
+                <dict>
+                    <key>kind</key>
+                    <string>software-package</string>
+                    <key>url</key>
+                    <string>{ipa_url}</string>
+                </dict>
+            </array>
+            <key>metadata</key>
+            <dict>
+                <key>bundle-identifier</key>
+                <string>{OTA_BUNDLE_ID}</string>
+                <key>bundle-version</key>
+                <string>{OTA_BUNDLE_VERSION}</string>
+                <key>kind</key>
+                <string>software</string>
+                <key>title</key>
+                <string>{OTA_APP_TITLE}</string>
+            </dict>
+        </dict>
+    </array>
+</dict>
+</plist>"""
+    return Response(content=manifest, media_type="application/xml")
+
+
+@app.get("/ota", response_class=HTMLResponse)
+async def ota_install_page(request: Request):
+    base_url = str(request.base_url).rstrip("/")
+    manifest_url = f"{base_url}/ota/manifest.plist"
+    install_url = f"itms-services://?action=download-manifest&url={manifest_url}"
+    html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Install {OTA_APP_TITLE}</title>
+    <style>
+        body {{ font-family: -apple-system, sans-serif; text-align: center; padding: 60px 20px; background: #f5f5f7; }}
+        h1 {{ font-size: 24px; color: #1d1d1f; }}
+        p {{ color: #6e6e73; margin: 10px 0 30px; }}
+        a.btn {{ display: inline-block; padding: 16px 40px; background: #007aff; color: white;
+                 text-decoration: none; border-radius: 12px; font-size: 18px; font-weight: 600; }}
+        a.btn:active {{ background: #0056b3; }}
+        .note {{ margin-top: 30px; font-size: 13px; color: #86868b; }}
+    </style>
+</head>
+<body>
+    <h1>{OTA_APP_TITLE}</h1>
+    <p>Tap the button below to install on this device.</p>
+    <a class="btn" href="{install_url}">Install App</a>
+    <p class="note">Open this page in Safari on your iPhone.</p>
+</body>
+</html>"""
+    return html
 
 
 if __name__ == "__main__":

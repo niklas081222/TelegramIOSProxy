@@ -115,6 +115,7 @@ public enum AITranslationError: Error {
 
 public final class AIProxyClient {
     private let session: URLSession
+    private let batchSession: URLSession
     private let baseURL: String
 
     public init(baseURL: String) {
@@ -124,6 +125,13 @@ public final class AIProxyClient {
         config.timeoutIntervalForResource = 25
         config.httpMaximumConnectionsPerHost = 20
         self.session = URLSession(configuration: config)
+
+        // Batch requests process many items server-side, need longer timeout
+        let batchConfig = URLSessionConfiguration.default
+        batchConfig.timeoutIntervalForRequest = 120
+        batchConfig.timeoutIntervalForResource = 180
+        batchConfig.httpMaximumConnectionsPerHost = 20
+        self.batchSession = URLSession(configuration: batchConfig)
     }
 
     // MARK: - Translate
@@ -226,9 +234,9 @@ public final class AIProxyClient {
                 return EmptyDisposable
             }
 
-            let task = self.session.dataTask(with: urlRequest) { data, response, error in
+            let task = self.batchSession.dataTask(with: urlRequest) { data, response, error in
                 if let error = error {
-                    print("[AITranslation] Batch network error: \(error)")
+                    print("[AITranslation] Batch network error (\(items.count) items): \(error)")
                     subscriber.putNext([])
                     subscriber.putCompletion()
                     return
@@ -249,6 +257,7 @@ public final class AIProxyClient {
 
                 do {
                     let response = try JSONDecoder().decode(AIBatchTranslateResponse.self, from: data)
+                    print("[AITranslation] Batch completed: \(response.results.count)/\(items.count) results")
                     subscriber.putNext(response.results)
                 } catch {
                     print("[AITranslation] Batch decode error: \(error)")
