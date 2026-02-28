@@ -307,13 +307,91 @@ public final class AIBackgroundTranslationObserver {
         return combineLatest(signals) |> map { _ in }
     }
 
+    // MARK: - Streaming Individual Translation (for catch-up)
+
+    /// Fires N individual /translate requests concurrently. Each result is stored
+    /// in Postbox immediately upon completion — translations appear one-by-one
+    /// in the chat as they arrive, rather than all at once after a long wait.
+    private static func translateIndividuallyStreaming(
+        messages: [(MessageId, String, PeerId)],
+        context: AccountContext,
+        onAllComplete: @escaping () -> Void
+    ) {
+        guard !messages.isEmpty else {
+            onAllComplete()
+            return
+        }
+
+        let total = messages.count
+        var completedCount = 0
+
+        let useContext = AITranslationSettings.incomingContextMode == 2
+
+        if useContext {
+            // Fetch context once per peer, then fire individual requests
+            let peerIds = Set(messages.map { $0.2 })
+            let contextSignals: [Signal<(PeerId, [AIContextMessage]), NoError>] = peerIds.map { peerId in
+                ConversationContextProvider.getContext(
+                    chatId: peerId,
+                    context: context,
+                    direction: "incoming"
+                ) |> map { ctx in (peerId, ctx) }
+            }
+
+            let _ = (combineLatest(contextSignals)
+            |> map { pairs in Dictionary(uniqueKeysWithValues: pairs) }
+            |> deliverOnMainQueue).start(next: { contextByPeer in
+                for (msgId, text, peerId) in messages {
+                    let ctxMessages = contextByPeer[peerId] ?? []
+                    let _ = (AITranslationService.shared.translateIncomingWithContext(
+                        text: text, chatId: peerId, context: ctxMessages
+                    )
+                    |> mapToSignal { translatedText -> Signal<Void, NoError> in
+                        return context.account.postbox.transaction { transaction in
+                            Self.storeTranslation(transaction: transaction, msgId: msgId, translatedText: translatedText)
+                        } |> map { _ in }
+                    }
+                    |> deliverOnMainQueue).start(completed: {
+                        Self.inFlightMessageIds.remove(msgId)
+                        completedCount += 1
+                        if completedCount == total {
+                            onAllComplete()
+                        }
+                    })
+                }
+            })
+        } else {
+            // No context: fire individual requests directly
+            for (msgId, text, peerId) in messages {
+                let _ = (AITranslationService.shared.translateIncomingWithContext(
+                    text: text, chatId: peerId, context: []
+                )
+                |> mapToSignal { translatedText -> Signal<Void, NoError> in
+                    return context.account.postbox.transaction { transaction in
+                        Self.storeTranslation(transaction: transaction, msgId: msgId, translatedText: translatedText)
+                    } |> map { _ in }
+                }
+                |> deliverOnMainQueue).start(completed: {
+                    Self.inFlightMessageIds.remove(msgId)
+                    completedCount += 1
+                    if completedCount == total {
+                        onAllComplete()
+                    }
+                })
+            }
+        }
+    }
+
     // MARK: - Catch-Up Translation
 
     /// Scan recent messages in a chat and translate ALL messages (both incoming
     /// and the user's own outgoing) that don't have a TranslationMessageAttribute yet.
     /// All messages use the Incoming System Prompt (DE → EN) since own messages are
     /// already stored in German on the server after outgoing translation.
-    /// Call this when a chat opens to catch up on untranslated messages.
+    ///
+    /// Translations stream back one-by-one (each displayed immediately) rather than
+    /// waiting for the entire batch. Messages are processed newest-first so the
+    /// bottom of the chat (what the user sees) translates first.
     public static func translateMessages(peerId: PeerId, context: AccountContext) {
         guard AITranslationSettings.enabled, AITranslationSettings.autoTranslateIncoming else { return }
 
@@ -324,79 +402,48 @@ public final class AIBackgroundTranslationObserver {
         }
         catchUpInProgress.insert(peerId)
 
-        let useContext = AITranslationSettings.incomingContextMode == 2
-
         let minTs = startTimestamp
 
-        let _ = (context.account.postbox.transaction { transaction -> [(MessageId, String)] in
-            var toTranslate: [(MessageId, String)] = []
+        let _ = (context.account.postbox.transaction { transaction -> [(MessageId, String, Int32)] in
+            var toTranslate: [(MessageId, String, Int32)] = []
             transaction.scanTopMessages(peerId: peerId, namespace: Namespaces.Message.Cloud, limit: 100) { message in
-                // Only translate messages after URL was configured
+                // Translate ALL messages (both incoming and own) after URL was configured
                 if message.timestamp >= minTs,
                    !message.text.isEmpty,
                    !message.attributes.contains(where: { $0 is TranslationMessageAttribute }),
                    !Self.inFlightMessageIds.contains(message.id) {
-                    toTranslate.append((message.id, message.text))
+                    toTranslate.append((message.id, message.text, message.timestamp))
                 }
                 return true
             }
+            // Sort newest first — most recent messages get dispatched first
+            toTranslate.sort { $0.2 > $1.2 }
             return toTranslate
         }
-        |> deliverOnMainQueue
-        |> mapToSignal { toTranslate -> Signal<Void, NoError> in
+        |> deliverOnMainQueue).start(next: { toTranslate in
             guard !toTranslate.isEmpty else {
                 Self.catchUpInProgress.remove(peerId)
-                return .complete()
+                return
             }
 
-            print("[AITranslation] Catch-up: translating \(toTranslate.count) messages for \(peerId)")
+            print("[AITranslation] Catch-up: streaming \(toTranslate.count) messages for \(peerId) (newest first)")
 
             // Mark all as in-flight
-            for (msgId, _) in toTranslate {
+            for (msgId, _, _) in toTranslate {
                 Self.inFlightMessageIds.insert(msgId)
             }
 
-            if useContext {
-                let messages = toTranslate.map { ($0.0, $0.1, peerId) }
-                return Self.translateWithContext(messages: messages, context: context)
-                |> afterCompleted {
-                    DispatchQueue.main.async {
-                        Self.catchUpInProgress.remove(peerId)
-                        for (msgId, _) in toTranslate {
-                            Self.inFlightMessageIds.remove(msgId)
-                        }
-                    }
+            // Fire individual requests concurrently — each stores result immediately
+            let messages = toTranslate.map { ($0.0, $0.1, peerId) }
+            Self.translateIndividuallyStreaming(
+                messages: messages,
+                context: context,
+                onAllComplete: {
+                    Self.catchUpInProgress.remove(peerId)
+                    print("[AITranslation] Catch-up completed: \(toTranslate.count) messages for \(peerId)")
                 }
-            } else {
-                var textDict: [AnyHashable: String] = [:]
-                var idMap: [String: MessageId] = [:]
-                for (i, (msgId, text)) in toTranslate.enumerated() {
-                    let key = "\(i)"
-                    textDict[key as AnyHashable] = text
-                    idMap[key] = msgId
-                }
-
-                return AITranslationService.shared.translateTexts(texts: textDict, fromLang: "de", toLang: "en")
-                |> mapToSignal { results -> Signal<Void, NoError> in
-                    // Clear in-flight and catch-up tracking
-                    DispatchQueue.main.async {
-                        Self.catchUpInProgress.remove(peerId)
-                        for (msgId, _) in toTranslate {
-                            Self.inFlightMessageIds.remove(msgId)
-                        }
-                    }
-
-                    guard let results = results else { return .complete() }
-                    return context.account.postbox.transaction { transaction in
-                        for (key, translatedText) in results {
-                            guard let k = key as? String, let msgId = idMap[k] else { continue }
-                            // Store translation even if identical to original to prevent re-translation
-                            Self.storeTranslation(transaction: transaction, msgId: msgId, translatedText: translatedText)
-                        }
-                    } |> map { _ in }
-                }
-            }
-        }).start()
+            )
+        })
     }
 
     // MARK: - Secondary: notificationMessages Observer
