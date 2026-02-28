@@ -15,7 +15,12 @@ import AccountContext
 public final class AIBackgroundTranslationObserver {
     private static var shared: AIBackgroundTranslationObserver?
     private static var storedContext: AccountContext?
-    private static let appStartTimestamp = Int32(Date().timeIntervalSince1970)
+    /// Use the persisted translationStartTimestamp (set when URL is saved).
+    /// Falls back to app launch time if never set (0).
+    private static var startTimestamp: Int32 {
+        let saved = AITranslationSettings.translationStartTimestamp
+        return saved > 0 ? saved : Int32(Date().timeIntervalSince1970)
+    }
 
     /// Retry delays in seconds for failed translations
     private static let retryDelays: [Double] = [2.0, 5.0, 10.0]
@@ -52,15 +57,15 @@ public final class AIBackgroundTranslationObserver {
         guard !newIds.isEmpty else { return }
 
         let accountPeerId = context.account.peerId
-        let startTs = appStartTimestamp
+        let startTs = startTimestamp
 
         let _ = (context.account.postbox.transaction { transaction -> [(MessageId, String, PeerId)] in
             var toTranslate: [(MessageId, String, PeerId)] = []
             for id in newIds {
                 guard let message = transaction.getMessage(id) else { continue }
-                // Only translate: incoming, recent (within 5 min of app start), non-empty, not already translated
+                // Only translate: incoming, after URL was configured, non-empty, not already translated
                 if message.author?.id != accountPeerId,
-                   message.timestamp >= startTs - 300,
+                   message.timestamp >= startTs,
                    !message.text.isEmpty,
                    !message.attributes.contains(where: { $0 is TranslationMessageAttribute }) {
                     toTranslate.append((message.id, message.text, message.id.peerId))
@@ -321,11 +326,14 @@ public final class AIBackgroundTranslationObserver {
 
         let useContext = AITranslationSettings.incomingContextMode == 2
 
+        let minTs = startTimestamp
+
         let _ = (context.account.postbox.transaction { transaction -> [(MessageId, String)] in
             var toTranslate: [(MessageId, String)] = []
             transaction.scanTopMessages(peerId: peerId, namespace: Namespaces.Message.Cloud, limit: 100) { message in
-                // Include ALL messages (both incoming and own) for batch translation on chat open
-                if !message.text.isEmpty,
+                // Only translate messages after URL was configured
+                if message.timestamp >= minTs,
+                   !message.text.isEmpty,
                    !message.attributes.contains(where: { $0 is TranslationMessageAttribute }),
                    !Self.inFlightMessageIds.contains(message.id) {
                     toTranslate.append((message.id, message.text))
@@ -401,11 +409,13 @@ public final class AIBackgroundTranslationObserver {
         disposable.set((context.account.stateManager.notificationMessages
         |> deliverOn(Queue.mainQueue())).start(next: { messageList in
             guard AITranslationSettings.enabled, AITranslationSettings.autoTranslateIncoming else { return }
+            let minTs = Self.startTimestamp
 
             for (messages, _, _, _) in messageList {
                 var toTranslate: [(MessageId, String, PeerId)] = []
                 for message in messages {
                     guard message.author?.id != accountPeerId,
+                          message.timestamp >= minTs,
                           !message.text.isEmpty,
                           !message.attributes.contains(where: { $0 is TranslationMessageAttribute }),
                           !Self.inFlightMessageIds.contains(message.id)

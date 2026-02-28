@@ -412,11 +412,6 @@ async def translate(request: TranslateRequest):
     return await translation_service.translate(request)
 
 
-# Limit concurrent OpenRouter API calls to prevent overwhelming the API
-# Must be high enough that a 100-item batch finishes within iOS's 30s timeout
-_translate_semaphore = asyncio.Semaphore(25)
-
-
 @app.post("/translate/batch", response_model=BatchTranslateResponse)
 async def translate_batch(request: BatchTranslateRequest):
     if not request.texts:
@@ -431,13 +426,12 @@ async def translate_batch(request: BatchTranslateRequest):
                 translated_text=item.text,
                 original_text=item.text,
             )
-        async with _translate_semaphore:
-            req = TranslateRequest(
-                text=item.text,
-                direction=item.direction,
-                chat_id=item.chat_id,
-            )
-            resp = await translation_service.translate(req)
+        req = TranslateRequest(
+            text=item.text,
+            direction=item.direction,
+            chat_id=item.chat_id,
+        )
+        resp = await translation_service.translate(req)
             return BatchResultItem(
                 id=item.id,
                 translated_text=resp.translated_text,

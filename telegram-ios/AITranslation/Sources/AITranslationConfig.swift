@@ -66,6 +66,11 @@ public struct AITranslationSettings {
     @AIStorage(key: "ai_translation:incoming_context_count", defaultValue: 20)
     public static var incomingContextMessageCount: Int
 
+    // Timestamp (Unix) from which translations should start.
+    // Reset when URL is saved so old messages are not retroactively translated.
+    @AIStorage(key: "ai_translation:start_timestamp", defaultValue: 0)
+    public static var translationStartTimestamp: Int32
+
     // Dev settings
     @AIStorage(key: "ai_translation:show_raw_responses", defaultValue: false)
     public static var showRawAPIResponses: Bool
