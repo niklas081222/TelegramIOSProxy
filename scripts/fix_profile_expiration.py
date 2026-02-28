@@ -34,6 +34,12 @@ PROFILE_SUFFIX_MAP = {
 TEAM_ID = '5RPK5SFG6M'
 BUNDLE_ID = 'com.niklas.translategram'
 
+# Registered device UDIDs (must also be added in Apple Developer portal)
+PROVISIONED_DEVICES = [
+    '80dccdbc6d929e5c1dabf7208465a6532728614b',   # Tim's iPhone
+    '00008030-00165014346B402E',                    # iPhone 11
+]
+
 
 def create_missing_profiles(profiles_dir, telegram_build_path):
     """Create any missing .mobileprovision files by copying from an existing one."""
@@ -181,6 +187,9 @@ def fix_profiles(profiles_dir, keychain_name, identity_name, signing_cert_der):
 
             profile_dict['Entitlements'] = entitlements
             profile_dict['Name'] = expected_name
+
+            # Set provisioned devices so all registered devices can install
+            profile_dict['ProvisionedDevices'] = list(PROVISIONED_DEVICES)
 
             # Fix ApplicationIdentifierPrefix if present
             if 'ApplicationIdentifierPrefix' in profile_dict:
