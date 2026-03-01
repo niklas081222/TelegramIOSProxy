@@ -13,6 +13,7 @@ import UndoUI
 // MARK: - Entry IDs
 
 private enum AISettingsSection: Int32 {
+    case version = -1
     case connection = 0
     case translation = 1
     case devSettings = 2
@@ -21,6 +22,8 @@ private enum AISettingsSection: Int32 {
 }
 
 private enum AISettingsEntry: ItemListNodeEntry {
+    case versionInfo(String)
+
     case connectionHeader(String)
     case proxyURL(String, String)
     case testConnection(String)
@@ -47,6 +50,8 @@ private enum AISettingsEntry: ItemListNodeEntry {
 
     var section: ItemListSectionId {
         switch self {
+        case .versionInfo:
+            return AISettingsSection.version.rawValue
         case .connectionHeader, .proxyURL, .testConnection, .connectionStatus:
             return AISettingsSection.connection.rawValue
         case .translationHeader, .globalToggle, .incomingToggle, .outgoingToggle:
@@ -62,6 +67,7 @@ private enum AISettingsEntry: ItemListNodeEntry {
 
     var stableId: Int32 {
         switch self {
+        case .versionInfo: return -1
         case .connectionHeader: return 0
         case .proxyURL: return 1
         case .testConnection: return 2
@@ -90,6 +96,8 @@ private enum AISettingsEntry: ItemListNodeEntry {
 
     static func == (lhs: AISettingsEntry, rhs: AISettingsEntry) -> Bool {
         switch (lhs, rhs) {
+        case let (.versionInfo(a), .versionInfo(b)):
+            return a == b
         case let (.connectionHeader(a), .connectionHeader(b)):
             return a == b
         case let (.proxyURL(a1, a2), .proxyURL(b1, b2)):
@@ -139,6 +147,13 @@ private enum AISettingsEntry: ItemListNodeEntry {
         }
 
         switch self {
+        case let .versionInfo(text):
+            return ItemListTextItem(
+                presentationData: presentationData,
+                text: .plain(text),
+                sectionId: self.section
+            )
+
         case let .connectionHeader(text):
             return ItemListSectionHeaderItem(
                 presentationData: presentationData,
@@ -374,6 +389,10 @@ private struct AISettingsState: Equatable {
 
 private func aiSettingsEntries(state: AISettingsState) -> [AISettingsEntry] {
     var entries: [AISettingsEntry] = []
+
+    let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+    let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
+    entries.append(.versionInfo("TranslateGram v\(version) (build \(build))"))
 
     let isEnabled = AITranslationSettings.enabled
 
