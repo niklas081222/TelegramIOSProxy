@@ -13,12 +13,12 @@ import UndoUI
 // MARK: - Entry IDs
 
 private enum AISettingsSection: Int32 {
-    case version = -1
     case connection = 0
     case translation = 1
     case devSettings = 2
     case cache = 3
     case prompt = 4
+    case version = 5
 }
 
 private enum AISettingsEntry: ItemListNodeEntry {
@@ -67,7 +67,7 @@ private enum AISettingsEntry: ItemListNodeEntry {
 
     var stableId: Int32 {
         switch self {
-        case .versionInfo: return -1
+        case .versionInfo: return 50
         case .connectionHeader: return 0
         case .proxyURL: return 1
         case .testConnection: return 2
@@ -390,10 +390,6 @@ private struct AISettingsState: Equatable {
 private func aiSettingsEntries(state: AISettingsState) -> [AISettingsEntry] {
     var entries: [AISettingsEntry] = []
 
-    let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
-    let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
-    entries.append(.versionInfo("TranslateGram v\(version) (build \(build))"))
-
     let isEnabled = AITranslationSettings.enabled
 
     entries.append(.connectionHeader("CONNECTION"))
@@ -426,6 +422,10 @@ private func aiSettingsEntries(state: AISettingsState) -> [AISettingsEntry] {
     entries.append(.promptHeader("SYSTEM PROMPTS"))
     entries.append(.outgoingPromptButton("Outgoing Prompt (EN > DE)"))
     entries.append(.incomingPromptButton("Incoming Prompt (DE > EN)"))
+
+    let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+    let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
+    entries.append(.versionInfo("TranslateGram v\(version) (build \(build))"))
 
     return entries
 }

@@ -402,14 +402,12 @@ public final class AIBackgroundTranslationObserver {
         }
         catchUpInProgress.insert(peerId)
 
-        let minTs = startTimestamp
-
         let _ = (context.account.postbox.transaction { transaction -> [(MessageId, String, Int32)] in
             var toTranslate: [(MessageId, String, Int32)] = []
             transaction.scanTopMessages(peerId: peerId, namespace: Namespaces.Message.Cloud, limit: 100) { message in
-                // Translate ALL messages (both incoming and own) after URL was configured
-                if message.timestamp >= minTs,
-                   !message.text.isEmpty,
+                // Translate ALL visible messages (both incoming and own) — no timestamp filter
+                // Catch-up is capped at 100 messages and only fires when user opens a chat
+                if !message.text.isEmpty,
                    !Self.inFlightMessageIds.contains(message.id) {
                     let existingAttr = message.attributes.first(where: { $0 is TranslationMessageAttribute }) as? TranslationMessageAttribute
                     // Translate if: no attribute, OR attribute text matches original (poisoned by empty pipeline)
