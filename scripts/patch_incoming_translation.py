@@ -52,7 +52,7 @@ def patch_incoming_translation(filepath: str) -> None:
     with open(filepath, "w") as f:
         f.write(content)
 
-    print(f"Patched {filepath} with translation rendering + streaming catch-up")
+    print(f"Patched {filepath}: translation rendering + streaming catch-up")
 
 
 if __name__ == "__main__":
