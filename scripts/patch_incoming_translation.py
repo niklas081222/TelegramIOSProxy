@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
-"""Patch ChatControllerLoadDisplayNode.swift to trigger catch-up translation on chat open.
+"""Patch ChatControllerLoadDisplayNode.swift for translation rendering + streaming catch-up.
 
-When a chat is opened, this patch triggers AIBackgroundTranslationObserver.translateMessages()
-to stream-translate any messages missing a TranslationMessageAttribute (newest first).
-
-Does NOT set translationState — Telegram's built-in batch pipeline is intentionally
-bypassed. All translations go through our streaming catch-up exclusively.
+Sets translationState(isEnabled: true) so Telegram's rendering code activates translation
+display. The actual translation is handled by our streaming catch-up (not Telegram's batch
+pipeline — AIExperimentalTranslationService is a no-op that returns empty results).
 """
 import sys
 import re
@@ -27,10 +25,25 @@ def patch_incoming_translation(filepath: str) -> None:
 
     override_code = """presentationInterfaceState = presentationInterfaceState.updatedTranslationState(contentData.state.translationState)
 
-            // AI Translation: catch-up translate on chat open (streaming, newest first)
+            // AI Translation: enable translation rendering + trigger streaming catch-up
             if AITranslationSettings.enabled && AITranslationSettings.autoTranslateIncoming {
-                if case let .peer(chatPeerId) = self.chatLocation {
-                    AIBackgroundTranslationObserver.translateMessages(peerId: chatPeerId, context: self.context)
+                let existingState = presentationInterfaceState.translationState
+                if existingState == nil || existingState?.isEnabled != true {
+                    presentationInterfaceState = presentationInterfaceState.updatedTranslationState(
+                        ChatPresentationTranslationState(isEnabled: true, fromLang: "de", toLang: "en")
+                    )
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self else { return }
+                        self.updateChatPresentationInterfaceState(interactive: false) { state in
+                            return state.updatedTranslationState(
+                                ChatPresentationTranslationState(isEnabled: true, fromLang: "de", toLang: "en")
+                            )
+                        }
+                    }
+                    // Streaming catch-up: translate missing messages individually, newest first
+                    if case let .peer(chatPeerId) = self.chatLocation {
+                        AIBackgroundTranslationObserver.translateMessages(peerId: chatPeerId, context: self.context)
+                    }
                 }
             }"""
 
@@ -39,7 +52,7 @@ def patch_incoming_translation(filepath: str) -> None:
     with open(filepath, "w") as f:
         f.write(content)
 
-    print(f"Patched {filepath} with incoming auto-translation override + catch-up")
+    print(f"Patched {filepath} with translation rendering + streaming catch-up")
 
 
 if __name__ == "__main__":
