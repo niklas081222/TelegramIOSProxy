@@ -50,19 +50,36 @@ def patch_load_display_node(filepath: str) -> None:
     else:
         indent = "                        "
 
-    new_code = f"""{indent}// AI Translation: fire-and-forget translate + enqueue for each message.
-{indent}// Text input clears instantly; translation runs in background.
+    new_code = f"""{indent}// AI Translation: strict translate + enqueue — HARD BLOCK on failure.
+{indent}// Text clears immediately for snappy UX; restored on failure.
 {indent}for aiMsg in transformedMessages {{
 {indent}    switch aiMsg {{
 {indent}    case let .message(text, attributes, inlineStickers, mediaReference, threadId, replyToMessageId, replyToStoryId, localGroupingKey, correlationId, bubbleUpEmojiOrStickersets):
 {indent}        if !text.isEmpty && AITranslationSettings.enabled && AITranslationSettings.autoTranslateOutgoing {{
 {indent}            let originalText = text
-{indent}            let _ = (AITranslationService.shared.translateOutgoing(text: text, chatId: peerId, context: strongSelf.context)
-{indent}            |> mapToSignal {{ translatedText -> Signal<[MessageId?], NoError> in
-{indent}                var newAttributes = attributes
-{indent}                newAttributes.append(TranslationMessageAttribute(text: originalText, entities: [], toLang: "en"))
-{indent}                return enqueueMessages(account: strongSelf.context.account, peerId: peerId, messages: [.message(text: translatedText, attributes: newAttributes, inlineStickers: inlineStickers, mediaReference: mediaReference, threadId: threadId, replyToMessageId: replyToMessageId, replyToStoryId: replyToStoryId, localGroupingKey: localGroupingKey, correlationId: correlationId, bubbleUpEmojiOrStickersets: bubbleUpEmojiOrStickersets)])
-{indent}            }}).start()
+{indent}            let _ = (AITranslationService.shared.translateOutgoingStrict(text: text, chatId: peerId, context: strongSelf.context)
+{indent}            |> deliverOnMainQueue).start(next: {{ [weak strongSelf] translatedText in
+{indent}                guard let strongSelf = strongSelf else {{ return }}
+{indent}                if let translatedText = translatedText, !translatedText.isEmpty {{
+{indent}                    // SUCCESS: enqueue translated message
+{indent}                    var newAttributes = attributes
+{indent}                    newAttributes.append(TranslationMessageAttribute(text: originalText, entities: [], toLang: "en"))
+{indent}                    let _ = enqueueMessages(account: strongSelf.context.account, peerId: peerId, messages: [.message(text: translatedText, attributes: newAttributes, inlineStickers: inlineStickers, mediaReference: mediaReference, threadId: threadId, replyToMessageId: replyToMessageId, replyToStoryId: replyToStoryId, localGroupingKey: localGroupingKey, correlationId: correlationId, bubbleUpEmojiOrStickersets: bubbleUpEmojiOrStickersets)]).start()
+{indent}                }} else {{
+{indent}                    // FAILURE: restore text to input box + show error toast
+{indent}                    if let textInputPanelNode = strongSelf.chatDisplayNode.inputPanelNode as? ChatTextInputPanelNode {{
+{indent}                        if textInputPanelNode.text.isEmpty {{
+{indent}                            textInputPanelNode.text = originalText
+{indent}                        }}
+{indent}                    }}
+{indent}                    strongSelf.present(UndoOverlayController(
+{indent}                        presentationData: strongSelf.presentationData,
+{indent}                        content: .info(title: nil, text: "Translation failed! Try again.", timeout: 3.0, customUndoText: nil),
+{indent}                        elevatedLayout: true,
+{indent}                        action: {{ _ in return false }}
+{indent}                    ), in: .current)
+{indent}                }}
+{indent}            }})
 {indent}        }} else {{
 {indent}            let _ = enqueueMessages(account: strongSelf.context.account, peerId: peerId, messages: [aiMsg]).start()
 {indent}        }}

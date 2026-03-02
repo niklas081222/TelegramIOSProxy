@@ -210,6 +210,79 @@ public final class AIProxyClient {
         }
     }
 
+    // MARK: - Translate Strict (for outgoing — nil on ANY failure)
+
+    /// Same as translate() but returns nil on any error instead of falling back
+    /// to original text. Used for outgoing messages where sending untranslated
+    /// text must be prevented.
+    public func translateStrict(
+        text: String,
+        direction: String,
+        chatId: Int64,
+        context: [AIContextMessage]
+    ) -> Signal<String?, NoError> {
+        guard let url = URL(string: "\(baseURL)/translate") else {
+            return .single(nil)
+        }
+
+        let request = AITranslateRequest(
+            text: text,
+            direction: direction,
+            chatId: String(chatId),
+            context: context
+        )
+
+        return Signal { subscriber in
+            var urlRequest = URLRequest(url: url)
+            urlRequest.httpMethod = "POST"
+            urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+            do {
+                urlRequest.httpBody = try JSONEncoder().encode(request)
+            } catch {
+                subscriber.putNext(nil)
+                subscriber.putCompletion()
+                return EmptyDisposable
+            }
+
+            let task = self.session.dataTask(with: urlRequest) { data, response, error in
+                if let error = error {
+                    print("[AITranslation] Strict: network error: \(error)")
+                    subscriber.putNext(nil)
+                    subscriber.putCompletion()
+                    return
+                }
+
+                guard let data = data else {
+                    print("[AITranslation] Strict: no data received")
+                    subscriber.putNext(nil)
+                    subscriber.putCompletion()
+                    return
+                }
+
+                do {
+                    let response = try JSONDecoder().decode(AITranslateResponse.self, from: data)
+                    if response.translationFailed || response.translatedText.isEmpty {
+                        print("[AITranslation] Strict: translation failed for: \(text.prefix(50))...")
+                        subscriber.putNext(nil)
+                    } else {
+                        subscriber.putNext(response.translatedText)
+                    }
+                } catch {
+                    print("[AITranslation] Strict: decode error: \(error)")
+                    subscriber.putNext(nil)
+                }
+                subscriber.putCompletion()
+            }
+
+            task.resume()
+
+            return ActionDisposable {
+                task.cancel()
+            }
+        }
+    }
+
     // MARK: - Batch Translate
 
     public func translateBatch(

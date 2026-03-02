@@ -59,6 +59,39 @@ public final class AITranslationService {
         }
     }
 
+    /// Strict outgoing translation — returns nil on ANY failure.
+    /// Used by the outgoing hook to hard-block untranslated messages.
+    public func translateOutgoingStrict(
+        text: String,
+        chatId: PeerId,
+        context: AccountContext
+    ) -> Signal<String?, NoError> {
+        guard shouldTranslateOutgoing(chatId: chatId),
+              let client = proxyClient else {
+            return .single(nil)
+        }
+
+        let contextSignal: Signal<[AIContextMessage], NoError>
+        if AITranslationSettings.contextMode == 2 {
+            contextSignal = ConversationContextProvider.getContext(
+                chatId: chatId,
+                context: context
+            )
+        } else {
+            contextSignal = .single([])
+        }
+
+        return contextSignal
+        |> mapToSignal { contextMessages -> Signal<String?, NoError> in
+            return client.translateStrict(
+                text: text,
+                direction: "outgoing",
+                chatId: chatId.id._internalGetInt64Value(),
+                context: contextMessages
+            )
+        }
+    }
+
     // MARK: - Incoming Translation (DE → EN)
 
     /// Translates incoming message text for display.
