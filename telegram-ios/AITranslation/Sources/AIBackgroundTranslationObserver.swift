@@ -32,9 +32,24 @@ public final class AIBackgroundTranslationObserver {
     /// Track per-peer catch-up to prevent duplicate translateMessages calls
     private static var catchUpInProgress = Set<PeerId>()
 
-    /// Call once when an authorized account is available.
+    /// Call when an authorized account is available. Handles account switches
+    /// by tearing down the old observer and creating a new one for the new account.
     public static func startIfNeeded(context: AccountContext) {
-        guard shared == nil else { return }
+        // Same account — nothing to do
+        if let existing = storedContext, existing.account.peerId == context.account.peerId {
+            return
+        }
+
+        // Tear down old observer (disposes notificationMessages subscription)
+        if shared != nil {
+            print("[AITranslation] Account switch: reinitializing observer")
+            shared?.disposable.dispose()
+            shared = nil
+            inFlightMessageIds.removeAll()
+            catchUpInProgress.removeAll()
+        }
+
+        // Create new observer for new account
         storedContext = context
         shared = AIBackgroundTranslationObserver(context: context)
 
@@ -43,6 +58,10 @@ public final class AIBackgroundTranslationObserver {
         aiNewIncomingMessagesCallback = { messageIds in
             Self.translateMessageIds(messageIds)
         }
+
+        // Catch-up: translate recent messages across top chats on the new account.
+        // Handles messages that arrived while the user was on a different account.
+        Self.catchUpAllUnreadChats(context: context)
     }
 
     // MARK: - Primary: Translate by Message IDs (from AccountStateManager callback)
@@ -228,6 +247,31 @@ public final class AIBackgroundTranslationObserver {
                     print("[AITranslation] Catch-up completed: \(toTranslate.count) messages for \(peerId)")
                 }
             )
+        })
+    }
+
+    // MARK: - Account Switch Catch-Up
+
+    /// On account switch, query the top 50 most recent chats and trigger
+    /// catch-up translation for each. translateMessages handles scanning,
+    /// deduplication (catchUpInProgress), and per-message translation internally.
+    private static func catchUpAllUnreadChats(context: AccountContext) {
+        guard AITranslationSettings.enabled, AITranslationSettings.autoTranslateIncoming else { return }
+
+        let _ = (context.account.viewTracker.tailChatListView(
+            groupId: .root,
+            filterPredicate: nil,
+            count: 50
+        )
+        |> take(1)
+        |> deliverOnMainQueue).start(next: { view, _ in
+            print("[AITranslation] Account switch catch-up: scanning \(view.entries.count) chats")
+            for entry in view.entries {
+                if case let .MessageEntry(entryData) = entry {
+                    let peerId = entryData.index.messageIndex.id.peerId
+                    Self.translateMessages(peerId: peerId, context: context)
+                }
+            }
         })
     }
 
