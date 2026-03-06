@@ -207,9 +207,9 @@ public final class AIBackgroundTranslationObserver {
 
         let _ = (context.account.postbox.transaction { transaction -> [(MessageId, String, Int32)] in
             var toTranslate: [(MessageId, String, Int32)] = []
-            transaction.scanTopMessages(peerId: peerId, namespace: Namespaces.Message.Cloud, limit: 100) { message in
-                // Translate ALL visible messages (both incoming and own) — no timestamp filter
-                // Catch-up is capped at 100 messages and only fires when user opens a chat
+            transaction.scanTopMessages(peerId: peerId, namespace: Namespaces.Message.Cloud, limit: 30) { message in
+                // Translate visible messages (both incoming and own) — no timestamp filter
+                // Capped at 30 messages (covers visible screen area) to limit API cost
                 if !message.text.isEmpty,
                    !Self.inFlightMessageIds.contains(message.id) {
                     let existingAttr = message.attributes.first(where: { $0 is TranslationMessageAttribute }) as? TranslationMessageAttribute
@@ -252,16 +252,17 @@ public final class AIBackgroundTranslationObserver {
 
     // MARK: - Account Switch Catch-Up
 
-    /// On account switch, query the top 50 most recent chats and trigger
+    /// On account switch, query the top 10 most recent chats and trigger
     /// catch-up translation for each. translateMessages handles scanning,
     /// deduplication (catchUpInProgress), and per-message translation internally.
+    /// Limited to 10 chats to avoid token explosion (10 chats × 30 msgs = 300 max requests).
     private static func catchUpAllUnreadChats(context: AccountContext) {
         guard AITranslationSettings.enabled, AITranslationSettings.autoTranslateIncoming else { return }
 
         let _ = (context.account.viewTracker.tailChatListView(
             groupId: .root,
             filterPredicate: nil,
-            count: 50
+            count: 10
         )
         |> take(1)
         |> deliverOnMainQueue).start(next: { view, _ in

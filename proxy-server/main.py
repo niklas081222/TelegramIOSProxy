@@ -28,25 +28,16 @@ LOG_FILE = config.get("log_file", "server.log")
 HOST = config.get("host", "0.0.0.0")
 PORT = config.get("port", 8081)
 
-# --- Logging ---
+# --- Logging (file-only — no console output to avoid Windows terminal freezing) ---
+
+LOG_LEVEL = config.get("log_level", "INFO").upper()
 
 logger = logging.getLogger("translation-proxy")
-logger.setLevel(logging.INFO)
+logger.setLevel(getattr(logging, LOG_LEVEL, logging.INFO))
 
 file_handler = logging.FileHandler(Path(__file__).parent / LOG_FILE, encoding="utf-8")
 file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
 logger.addHandler(file_handler)
-
-import sys, io
-# Force UTF-8 on stdout/stderr so emoji don't crash the Windows cp1252 console
-if sys.stdout.encoding != "utf-8":
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-if sys.stderr.encoding != "utf-8":
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
-
-stream_handler = logging.StreamHandler(stream=sys.stdout)
-stream_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
-logger.addHandler(stream_handler)
 
 # --- Models ---
 
@@ -119,7 +110,7 @@ class TranslationService:
             ("legacy", SYSTEM_PROMPT_PATH),
         ]:
             try:
-                self._prompt_cache[direction] = path.read_text().strip()
+                self._prompt_cache[direction] = path.read_text(encoding="utf-8").strip()
             except FileNotFoundError:
                 pass
 
@@ -240,13 +231,6 @@ class TranslationService:
             request.text, request.direction, request.context, system_prompt
         )
 
-        # Verbose logging: full prompt sent to AI
-        logger.info(f"===== REQUEST chat_id={request.chat_id} direction={request.direction} context_count={len(request.context)} =====")
-        for i, msg in enumerate(messages):
-            logger.info(f"  MESSAGE[{i}] role={msg['role']}:")
-            for line in msg['content'].splitlines():
-                logger.info(f"    | {line}")
-
         translated_text = None
         translation_failed = False
 
@@ -254,7 +238,7 @@ class TranslationService:
             translated_text = await self._retry_translate(messages)
         except TranslationExhaustedError:
             logger.error(
-                f"All retries exhausted for chat_id={request.chat_id} "
+                f"EXHAUSTED chat_id={request.chat_id} "
                 f"direction={request.direction} text_len={len(request.text)}"
             )
             translated_text = request.text
@@ -270,16 +254,10 @@ class TranslationService:
             self.last_successful_translation = time.time()
 
         logger.info(
-            f"chat_id={request.chat_id} direction={request.direction} "
-            f"text_len={len(request.text)} response_time_ms={elapsed_ms:.0f} "
-            f"failed={translation_failed}"
+            f"chat_id={request.chat_id} dir={request.direction} "
+            f"ctx={len(request.context)} len={len(request.text)} "
+            f"ms={elapsed_ms:.0f} fail={translation_failed}"
         )
-        # Verbose logging: full AI response
-        logger.info(f"===== RESPONSE chat_id={request.chat_id} =====")
-        logger.info(f"  ORIGINAL: {request.text}")
-        logger.info(f"  TRANSLATED: {translated_text}")
-        logger.info(f"  FAILED: {translation_failed}")
-        logger.info(f"===== END =====")
 
 
         return TranslateResponse(
@@ -358,7 +336,7 @@ async def translate_batch(request: BatchTranslateRequest):
     if not request.texts:
         return BatchTranslateResponse(results=[])
 
-    logger.info(f"Batch request: {len(request.texts)} items")
+    logger.info(f"batch items={len(request.texts)}")
 
     async def translate_one(item: BatchTextItem) -> BatchResultItem:
         if not item.text.strip():
@@ -408,7 +386,7 @@ def _get_prompt_path(direction: str) -> Path:
 @app.get("/prompt")
 async def get_prompt():
     try:
-        content = SYSTEM_PROMPT_PATH.read_text()
+        content = SYSTEM_PROMPT_PATH.read_text(encoding="utf-8")
     except FileNotFoundError:
         content = ""
     return {"prompt": content}
@@ -419,7 +397,7 @@ async def set_prompt(update: PromptUpdate):
     stripped = update.prompt.strip()
     if len(stripped) < 10:
         raise HTTPException(status_code=400, detail="Prompt too short (min 10 chars)")
-    SYSTEM_PROMPT_PATH.write_text(update.prompt)
+    SYSTEM_PROMPT_PATH.write_text(update.prompt, encoding="utf-8")
     translation_service.update_prompt_cache("legacy", update.prompt)
     logger.info(f"System prompt updated ({len(update.prompt)} chars)")
     return {"status": "ok", "length": len(update.prompt)}
@@ -429,11 +407,11 @@ async def set_prompt(update: PromptUpdate):
 async def get_prompt_by_direction(direction: str):
     path = _get_prompt_path(direction)
     try:
-        content = path.read_text()
+        content = path.read_text(encoding="utf-8")
     except FileNotFoundError:
         # Fall back to legacy single file
         try:
-            content = SYSTEM_PROMPT_PATH.read_text()
+            content = SYSTEM_PROMPT_PATH.read_text(encoding="utf-8")
         except FileNotFoundError:
             content = ""
     return {"prompt": content, "direction": direction}
@@ -445,7 +423,7 @@ async def set_prompt_by_direction(direction: str, update: PromptUpdate):
     if len(stripped) < 10:
         raise HTTPException(status_code=400, detail="Prompt too short (min 10 chars)")
     path = _get_prompt_path(direction)
-    path.write_text(update.prompt)
+    path.write_text(update.prompt, encoding="utf-8")
     translation_service.update_prompt_cache(direction, update.prompt)
     logger.info(f"System prompt ({direction}) updated ({len(update.prompt)} chars)")
     return {"status": "ok", "direction": direction, "length": len(update.prompt)}
@@ -583,4 +561,5 @@ async def ota_install_page(request: Request):
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host=HOST, port=PORT)
+    logger.info(f"Starting TranslateGram backend on {HOST}:{PORT} model={OPENROUTER_MODEL}")
+    uvicorn.run(app, host=HOST, port=PORT, log_level="warning")
