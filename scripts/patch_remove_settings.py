@@ -49,7 +49,13 @@ def patch_remove_settings(filepath: str) -> None:
                     elif content[pos] == "}":
                         depth -= 1
                         if depth == 0:
-                            # Found outermost closing brace
+                            # Check if "else" follows (if/else pattern)
+                            rest = content[pos + 1:pos + 20].lstrip()
+                            if rest.startswith("else"):
+                                # Continue to include the else block
+                                pos += 1
+                                continue
+                            # No more blocks — done
                             dl_end = pos + 1
                             content = content[:dl_start] + content[dl_end:]
                             print("Removed devicesLabel variable")
