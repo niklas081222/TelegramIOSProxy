@@ -84,8 +84,9 @@ public final class AIBackgroundTranslationObserver {
             var toTranslate: [(MessageId, String, PeerId)] = []
             for id in newIds {
                 guard let message = transaction.getMessage(id) else { continue }
-                // Skip bot chats (1-on-1 only — group peers are TelegramGroup/Channel, not TelegramUser)
-                if let chatPeer = transaction.getPeer(id.peerId) as? TelegramUser, chatPeer.botInfo != nil { continue }
+                // Skip bot chats and Telegram Service Notifications (peer 777000)
+                if let chatPeer = transaction.getPeer(id.peerId) as? TelegramUser,
+                   chatPeer.botInfo != nil || id.peerId.id._internalGetInt64Value() == 777000 { continue }
                 // Only translate: incoming, after URL was configured, non-empty, not already translated
                 if message.author?.id != accountPeerId,
                    message.timestamp >= startTs,
@@ -209,8 +210,9 @@ public final class AIBackgroundTranslationObserver {
 
         let _ = (context.account.postbox.transaction { transaction -> [(MessageId, String, Int32)] in
             var toTranslate: [(MessageId, String, Int32)] = []
-            // Skip bot chats entirely (1-on-1 only — group peers are TelegramGroup/Channel, not TelegramUser)
-            if let chatPeer = transaction.getPeer(peerId) as? TelegramUser, chatPeer.botInfo != nil {
+            // Skip bot chats and Telegram Service Notifications (peer 777000)
+            if let chatPeer = transaction.getPeer(peerId) as? TelegramUser,
+               chatPeer.botInfo != nil || peerId.id._internalGetInt64Value() == 777000 {
                 return toTranslate
             }
             transaction.scanTopMessages(peerId: peerId, namespace: Namespaces.Message.Cloud, limit: 30) { message in

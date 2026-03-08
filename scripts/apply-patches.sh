@@ -190,7 +190,7 @@ else
 fi
 
 # 16. Hide translation pop-up bar in ChatControllerNode
-echo "  [16/19] Hiding translation bar in ChatControllerNode.swift..."
+echo "  [16/20] Hiding translation bar in ChatControllerNode.swift..."
 CHAT_CTRL_NODE="${TARGET_DIR}/submodules/TelegramUI/Sources/ChatControllerNode.swift"
 if grep -q "AI Translation: hide translation bar" "$CHAT_CTRL_NODE" 2>/dev/null; then
     echo "    Already patched, skipping."
@@ -200,7 +200,7 @@ else
 fi
 
 # 17. Patch ChatController.swift for media caption translation
-echo "  [17/19] Patching ChatController.swift for media caption translation..."
+echo "  [17/20] Patching ChatController.swift for media caption translation..."
 CHAT_CTRL="${TARGET_DIR}/submodules/TelegramUI/Sources/ChatController.swift"
 if grep -q "AI Translation: media caption translation guard" "$CHAT_CTRL" 2>/dev/null; then
     echo "    Already patched, skipping."
@@ -210,7 +210,7 @@ else
 fi
 
 # 18. Remove Devices and Privacy settings entries
-echo "  [18/19] Removing Devices and Privacy settings entries..."
+echo "  [18/20] Removing Devices and Privacy settings entries..."
 if grep -q "AI Translation: removed Devices setting" "$PEERINFO" 2>/dev/null; then
     echo "    Already patched, skipping."
 else
@@ -218,8 +218,18 @@ else
     echo "    Done."
 fi
 
-# 19. Apply any additional .patch files
-echo "  [19/19] Applying additional patch files..."
+# 19. Hide Telegram Service Notifications chat (peer 777000)
+echo "  [19/20] Hiding Service Notifications chat from chat list..."
+CHAT_LIST_NODE="${TARGET_DIR}/submodules/ChatListUI/Sources/Node/ChatListNode.swift"
+if grep -q "AI Translation: hide service notifications" "$CHAT_LIST_NODE" 2>/dev/null; then
+    echo "    Already patched, skipping."
+else
+    python3 "${SCRIPT_DIR}/patch_hide_service_chat.py" "$CHAT_LIST_NODE"
+    echo "    Done."
+fi
+
+# 20. Apply any additional .patch files
+echo "  [20/20] Applying additional patch files..."
 PATCH_COUNT=0
 for patch_file in "${PATCHES_DIR}"/*.patch; do
     [ -f "$patch_file" ] || continue
