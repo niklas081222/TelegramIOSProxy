@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import re
 import time
 from pathlib import Path
 from typing import Optional
@@ -87,6 +88,50 @@ class BatchTranslateResponse(BaseModel):
 
 
 class TranslationService:
+    # Words/patterns identical in English and German — skip API call, return as-is.
+    # Greetings, interjections, loanwords, and common chat slang.
+    PASSTHROUGH_WORDS: set[str] = {
+        "hey", "hi", "hello", "hallo", "ok", "okay", "okey", "oke", "okee", "oki",
+        "okok", "hmm", "hmmm", "hm", "mhm", "mhh", "haha", "hehe", "lol",
+        "wow", "nice", "cool", "super", "fit", "standard", "premium", "basic",
+        "cam", "chat", "start", "done", "moment", "min",
+        "baby", "babe", "bro", "daddy", "honey",
+        "paypal", "paysafe", "sparkasse", "telegram", "screenshot",
+        "yes", "no", "cc", "pp",
+    }
+
+    @staticmethod
+    def _is_passthrough(text: str) -> bool:
+        """Check if text should bypass AI translation and be returned as-is."""
+        stripped = text.strip()
+        if not stripped:
+            return True
+
+        # Pure punctuation, numbers, symbols, emoji — no translatable content
+        if re.fullmatch(r'[\W\d\s€$@#]+', stripped, re.UNICODE):
+            return True
+
+        # Strip all non-letter chars, check if remaining is a known passthrough word
+        letters_only = re.sub(r'[^a-zA-Z]', '', stripped).lower()
+
+        # No letters at all (emoji-only, numbers-only)
+        if not letters_only:
+            return True
+
+        # Extended greeting variants: hey, heyy, heyyy, ..., hi, hii, hiii, ...
+        if re.fullmatch(r'he(y+)', letters_only) or re.fullmatch(r'h(i+)', letters_only):
+            return True
+
+        # Exact match in passthrough set
+        if letters_only in TranslationService.PASSTHROUGH_WORDS:
+            return True
+
+        # "huhu" and similar repeated syllable greetings
+        if re.fullmatch(r'(hu){2,}', letters_only):
+            return True
+
+        return False
+
     def __init__(self):
         limits = httpx.Limits(max_connections=100, max_keepalive_connections=20)
         self.client = httpx.AsyncClient(timeout=REQUEST_TIMEOUT, limits=limits)
@@ -224,6 +269,22 @@ class TranslationService:
 
     async def translate(self, request: TranslateRequest) -> TranslateResponse:
         self.stats["total_requests"] += 1
+
+        # Passthrough: skip API call for text that doesn't need translation
+        if self._is_passthrough(request.text):
+            self.stats["successful"] += 1
+            logger.info(
+                f"chat_id={request.chat_id} dir={request.direction} "
+                f"len={len(request.text)} PASSTHROUGH "
+                f"| {request.text[:80]}"
+            )
+            return TranslateResponse(
+                translated_text=request.text,
+                original_text=request.text,
+                direction=request.direction,
+                translation_failed=False,
+            )
+
         start_time = time.time()
 
         system_prompt = self._read_system_prompt(request.direction)
