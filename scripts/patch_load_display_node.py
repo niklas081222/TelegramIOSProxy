@@ -56,6 +56,8 @@ def patch_load_display_node(filepath: str) -> None:
     new_code = f"""{indent}// AI Translation: chronological queue with cascading failure.
 {indent}// Translation fires INSTANTLY per message. Sending is strict chronological order.
 {indent}// On failure: cascade-cancel all subsequent, restore failed text, show error.
+{indent}// Forwards + text-free messages are batched together to preserve album grouping.
+{indent}var aiPassthroughMessages: [EnqueueMessage] = []
 {indent}for aiMsg in transformedMessages {{
 {indent}    switch aiMsg {{
 {indent}    case let .message(text, attributes, inlineStickers, mediaReference, threadId, replyToMessageId, replyToStoryId, localGroupingKey, correlationId, bubbleUpEmojiOrStickersets):
@@ -90,11 +92,15 @@ def patch_load_display_node(filepath: str) -> None:
 {indent}                }}
 {indent}            )
 {indent}        }} else {{
-{indent}            let _ = enqueueMessages(account: strongSelf.context.account, peerId: peerId, messages: [aiMsg]).start()
+{indent}            aiPassthroughMessages.append(aiMsg)
 {indent}        }}
 {indent}    case .forward:
-{indent}        let _ = enqueueMessages(account: strongSelf.context.account, peerId: peerId, messages: [aiMsg]).start()
+{indent}        aiPassthroughMessages.append(aiMsg)
 {indent}    }}
+{indent}}}
+{indent}// Send all passthrough messages as ONE batch (preserves album grouping for forwards + text-free media)
+{indent}if !aiPassthroughMessages.isEmpty {{
+{indent}    let _ = enqueueMessages(account: strongSelf.context.account, peerId: peerId, messages: aiPassthroughMessages).start()
 {indent}}}
 {indent}signal = .single([])
 {indent}// AI Translation: clear text input immediately since messages are enqueued asynchronously.
