@@ -40,7 +40,10 @@ def patch_text_bubble(filepath: str) -> None:
     new = """} else if !item.message.text.isEmpty, let translateToLanguage = item.associatedData.translateToLanguage ?? ((item.message.attributes.contains(where: { $0 is TranslationMessageAttribute }) || (AITranslationSettings.enabled && AITranslationSettings.autoTranslateIncoming)) ? "en" : nil) {
                         // AI Translation: three-way translateToLanguage fallback (no incoming guard — own messages included)
                         if !item.message.attributes.contains(where: { $0 is TranslationMessageAttribute }) {
-                            isTranslating = true
+                            // Skip animation for bot chats
+                            if !AIBackgroundTranslationObserver.botChatIds.contains(item.message.id.peerId.id._internalGetInt64Value()) {
+                                isTranslating = true
+                            }
                         }"""
 
     content = content.replace(old, new, 1)

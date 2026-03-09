@@ -61,7 +61,7 @@ def patch_load_display_node(filepath: str) -> None:
 {indent}for aiMsg in transformedMessages {{
 {indent}    switch aiMsg {{
 {indent}    case let .message(text, attributes, inlineStickers, mediaReference, threadId, replyToMessageId, replyToStoryId, localGroupingKey, correlationId, bubbleUpEmojiOrStickersets):
-{indent}        if !text.isEmpty && AITranslationSettings.enabled && AITranslationSettings.autoTranslateOutgoing {{
+{indent}        if !text.isEmpty && AITranslationSettings.enabled && AITranslationSettings.autoTranslateOutgoing && !AIBackgroundTranslationObserver.botChatIds.contains(peerId.id._internalGetInt64Value()) {{
 {indent}            AIOutgoingMessageQueue.shared.enqueue(
 {indent}                text: text,
 {indent}                peerId: peerId,

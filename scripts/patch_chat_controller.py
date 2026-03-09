@@ -53,10 +53,11 @@ def patch_chat_controller(filepath: str) -> None:
     # Inject the translation guard right after the opening brace
     translation_guard = """
         // AI Translation: media caption translation guard
-        // Translates caption text, then sends ENTIRE batch as one call to preserve album grouping.
-        // Re-entry safe: if any message has TranslationMessageAttribute, skip entirely.
+        // Translates caption text, then enqueues ENTIRE batch directly to preserve album grouping
+        // and TranslationMessageAttribute (same path as compose bar text).
         if AITranslationSettings.enabled && AITranslationSettings.autoTranslateOutgoing,
-           let aiPeerId = self.chatLocation.peerId {
+           let aiPeerId = self.chatLocation.peerId,
+           !AIBackgroundTranslationObserver.botChatIds.contains(aiPeerId.id._internalGetInt64Value()) {
 
             // Re-entry check: if any message already has TranslationMessageAttribute,
             // this batch was already translated — skip to normal send
@@ -102,10 +103,12 @@ def patch_chat_controller(filepath: str) -> None:
                                 newAttributes.append(TranslationMessageAttribute(text: text, entities: [], toLang: "en"))
                                 newMessages[aiCaptionIdx] = .message(text: translatedText, attributes: newAttributes, inlineStickers: inlineStickers, mediaReference: mediaReference, threadId: threadId, replyToMessageId: replyToMessageId, replyToStoryId: replyToStoryId, localGroupingKey: localGroupingKey, correlationId: correlationId, bubbleUpEmojiOrStickersets: bubbleUpEmojiOrStickersets)
                             }
-                            self.sendMessages(newMessages)
+                            // Use enqueueMessages directly (same path as compose bar) to preserve TranslationMessageAttribute
+                            AIBackgroundTranslationObserver.pendingCaptionOriginals["\\(aiPeerId.id._internalGetInt64Value())_\\(translatedText)"] = aiCaptionText
+                            let _ = enqueueMessages(account: self.context.account, peerId: aiPeerId, messages: newMessages).start()
                         } else {
                             // Translation failed — send original untranslated to preserve media
-                            self.sendMessages(aiOriginalMessages)
+                            let _ = enqueueMessages(account: self.context.account, peerId: aiPeerId, messages: aiOriginalMessages).start()
                             self.present(UndoOverlayController(
                                 presentationData: self.presentationData,
                                 content: .info(title: nil, text: "Caption translation failed. Sent in original language.", timeout: 5.0, customUndoText: nil),
@@ -120,7 +123,7 @@ def patch_chat_controller(filepath: str) -> None:
                         guard !aiTranslationCompleted, let self = self else { return }
                         aiTranslationCompleted = true
                         aiTranslationDisposable.dispose()
-                        self.sendMessages(aiOriginalMessages)
+                        let _ = enqueueMessages(account: self.context.account, peerId: aiPeerId, messages: aiOriginalMessages).start()
                         self.present(UndoOverlayController(
                             presentationData: self.presentationData,
                             content: .info(title: nil, text: "Caption translation timed out. Sent in original language.", timeout: 5.0, customUndoText: nil),

@@ -32,6 +32,14 @@ public final class AIBackgroundTranslationObserver {
     /// Track per-peer catch-up to prevent duplicate translateMessages calls
     private static var catchUpInProgress = Set<PeerId>()
 
+    /// Cache of known bot chat peer IDs — checked by display-layer patches to skip animation/translation
+    public static var botChatIds = Set<Int64>()
+
+    /// Pending caption originals: "chatId_germanText" → originalEnglish
+    /// Used as safety net to prevent redundant API calls when TranslationMessageAttribute
+    /// gets stripped during the media send pipeline.
+    public static var pendingCaptionOriginals: [String: String] = [:]
+
     /// Call when an authorized account is available. Handles account switches
     /// by tearing down the old observer and creating a new one for the new account.
     public static func startIfNeeded(context: AccountContext) {
@@ -86,7 +94,12 @@ public final class AIBackgroundTranslationObserver {
                 guard let message = transaction.getMessage(id) else { continue }
                 // Skip bot chats and Telegram Service Notifications (peer 777000)
                 if let chatPeer = transaction.getPeer(id.peerId) as? TelegramUser,
-                   chatPeer.botInfo != nil || id.peerId.id._internalGetInt64Value() == 777000 { continue }
+                   chatPeer.botInfo != nil || id.peerId.id._internalGetInt64Value() == 777000 {
+                    if chatPeer.botInfo != nil {
+                        Self.botChatIds.insert(id.peerId.id._internalGetInt64Value())
+                    }
+                    continue
+                }
                 // Only translate: incoming, after URL was configured, non-empty, not already translated
                 if message.author?.id != accountPeerId,
                    message.timestamp >= startTs,
@@ -213,8 +226,12 @@ public final class AIBackgroundTranslationObserver {
             // Skip bot chats and Telegram Service Notifications (peer 777000)
             if let chatPeer = transaction.getPeer(peerId) as? TelegramUser,
                chatPeer.botInfo != nil || peerId.id._internalGetInt64Value() == 777000 {
+                if chatPeer.botInfo != nil {
+                    Self.botChatIds.insert(peerId.id._internalGetInt64Value())
+                }
                 return toTranslate
             }
+            let peerIdInt = peerId.id._internalGetInt64Value()
             transaction.scanTopMessages(peerId: peerId, namespace: Namespaces.Message.Cloud, limit: 30) { message in
                 // Translate visible messages (both incoming and own) — no timestamp filter
                 // Capped at 30 messages (covers visible screen area) to limit API cost
@@ -223,7 +240,14 @@ public final class AIBackgroundTranslationObserver {
                     let existingAttr = message.attributes.first(where: { $0 is TranslationMessageAttribute }) as? TranslationMessageAttribute
                     // Translate if: no attribute, OR attribute text matches original (poisoned by empty pipeline)
                     if existingAttr == nil || existingAttr?.text == message.text {
-                        toTranslate.append((message.id, message.text, message.timestamp))
+                        // Check pending captions cache — use cached English instead of API call
+                        let cacheKey = "\(peerIdInt)_\(message.text)"
+                        if let cachedOriginal = Self.pendingCaptionOriginals[cacheKey] {
+                            Self.pendingCaptionOriginals.removeValue(forKey: cacheKey)
+                            Self.storeTranslation(transaction: transaction, msgId: message.id, translatedText: cachedOriginal)
+                        } else {
+                            toTranslate.append((message.id, message.text, message.timestamp))
+                        }
                     }
                 }
                 return true
@@ -300,7 +324,10 @@ public final class AIBackgroundTranslationObserver {
                 var toTranslate: [(MessageId, String, PeerId)] = []
                 for message in messages {
                     // Skip messages from bots (covers 1-on-1 bot chats where bot is the sender)
-                    if let user = message.author as? TelegramUser, user.botInfo != nil { continue }
+                    if let user = message.author as? TelegramUser, user.botInfo != nil {
+                        Self.botChatIds.insert(message.id.peerId.id._internalGetInt64Value())
+                        continue
+                    }
                     guard message.author?.id != accountPeerId,
                           message.timestamp >= minTs,
                           !message.text.isEmpty,

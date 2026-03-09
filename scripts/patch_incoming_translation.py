@@ -25,25 +25,48 @@ def patch_incoming_translation(filepath: str) -> None:
 
     override_code = """presentationInterfaceState = presentationInterfaceState.updatedTranslationState(contentData.state.translationState)
 
-            // AI Translation: enable translation rendering
+            // AI Translation: enable translation rendering (skip bot chats)
             if AITranslationSettings.enabled && AITranslationSettings.autoTranslateIncoming {
-                let existingState = presentationInterfaceState.translationState
-                if existingState == nil || existingState?.isEnabled != true {
-                    presentationInterfaceState = presentationInterfaceState.updatedTranslationState(
-                        ChatPresentationTranslationState(isEnabled: true, fromLang: "de", toLang: "en")
-                    )
-                    DispatchQueue.main.async { [weak self] in
-                        guard let self else { return }
-                        self.updateChatPresentationInterfaceState(interactive: false) { state in
-                            return state.updatedTranslationState(
+                if case let .peer(chatPeerId) = self.chatLocation {
+                    let aiPeerId64 = chatPeerId.id._internalGetInt64Value()
+
+                    // Quick sync check: skip known bot chats
+                    if AIBackgroundTranslationObserver.botChatIds.contains(aiPeerId64) {
+                        // Known bot — skip translation entirely
+                    } else {
+                        let existingState = presentationInterfaceState.translationState
+                        if existingState == nil || existingState?.isEnabled != true {
+                            presentationInterfaceState = presentationInterfaceState.updatedTranslationState(
                                 ChatPresentationTranslationState(isEnabled: true, fromLang: "de", toLang: "en")
                             )
+                            DispatchQueue.main.async { [weak self] in
+                                guard let self else { return }
+                                self.updateChatPresentationInterfaceState(interactive: false) { state in
+                                    return state.updatedTranslationState(
+                                        ChatPresentationTranslationState(isEnabled: true, fromLang: "de", toLang: "en")
+                                    )
+                                }
+                            }
                         }
+                        // Streaming catch-up: fires on EVERY chat open (deduped by catchUpInProgress set)
+                        // Also detects bots (adds to botChatIds) and returns early
+                        AIBackgroundTranslationObserver.translateMessages(peerId: chatPeerId, context: self.context)
+
+                        // Async bot detection fallback: if catch-up discovers this is a bot,
+                        // disable translation state after the fact
+                        let _ = (self.context.account.postbox.transaction { transaction -> Bool in
+                            if let peer = transaction.getPeer(chatPeerId) as? TelegramUser {
+                                return peer.botInfo != nil
+                            }
+                            return false
+                        } |> deliverOnMainQueue).start(next: { [weak self] isBot in
+                            guard let self = self, isBot else { return }
+                            AIBackgroundTranslationObserver.botChatIds.insert(aiPeerId64)
+                            self.updateChatPresentationInterfaceState(interactive: false) { state in
+                                return state.updatedTranslationState(nil)
+                            }
+                        })
                     }
-                }
-                // Streaming catch-up: fires on EVERY chat open (deduped by catchUpInProgress set)
-                if case let .peer(chatPeerId) = self.chatLocation {
-                    AIBackgroundTranslationObserver.translateMessages(peerId: chatPeerId, context: self.context)
                 }
             }"""
 

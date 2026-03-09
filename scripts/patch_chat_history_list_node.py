@@ -46,18 +46,22 @@ def patch_chat_history_list_node(filepath: str) -> None:
         # Use the exact match
         override_code = target + """
 
-                // AI Translation: force-enable incoming translation when our service is active
+                // AI Translation: force-enable incoming translation when our service is active (skip bot chats)
                 if translateToLanguage == nil && AITranslationSettings.enabled && AITranslationSettings.autoTranslateIncoming {
-                    translateToLanguage = ("de", "en")
+                    if let aiPeerId = chatLocation.peerId, !AIBackgroundTranslationObserver.botChatIds.contains(aiPeerId.id._internalGetInt64Value()) {
+                        translateToLanguage = ("de", "en")
+                    }
                 }"""
         content = content.replace(target, override_code, 1)
     else:
         # Use regex match — preserve original whitespace
         replacement = match.group(0) + """
 
-                // AI Translation: force-enable incoming translation when our service is active
+                // AI Translation: force-enable incoming translation when our service is active (skip bot chats)
                 if translateToLanguage == nil && AITranslationSettings.enabled && AITranslationSettings.autoTranslateIncoming {
-                    translateToLanguage = ("de", "en")
+                    if let aiPeerId = chatLocation.peerId, !AIBackgroundTranslationObserver.botChatIds.contains(aiPeerId.id._internalGetInt64Value()) {
+                        translateToLanguage = ("de", "en")
+                    }
                 }"""
         content = content[:match.start()] + replacement + content[match.end():]
 
