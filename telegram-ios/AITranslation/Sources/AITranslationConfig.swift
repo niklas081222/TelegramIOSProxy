@@ -2,11 +2,14 @@ import Foundation
 
 // MARK: - UserDefaults-backed Storage
 
+private final class AIStorageCache {
+    static var values: [String: Any] = [:]
+}
+
 @propertyWrapper
 public struct AIStorage<T: Codable> {
     private let key: String
     private let defaultValue: T
-    private static var cache: [String: Any] = [:]
 
     public init(key: String, defaultValue: T) {
         self.key = key
@@ -15,18 +18,18 @@ public struct AIStorage<T: Codable> {
 
     public var wrappedValue: T {
         get {
-            if let cached = Self.cache[key] as? T {
+            if let cached = AIStorageCache.values[key] as? T {
                 return cached
             }
             guard let data = UserDefaults.standard.data(forKey: key) else {
                 return defaultValue
             }
             let value = (try? JSONDecoder().decode(T.self, from: data)) ?? defaultValue
-            Self.cache[key] = value
+            AIStorageCache.values[key] = value
             return value
         }
         set {
-            Self.cache[key] = newValue
+            AIStorageCache.values[key] = newValue
             if let data = try? JSONEncoder().encode(newValue) {
                 UserDefaults.standard.set(data, forKey: key)
             }
