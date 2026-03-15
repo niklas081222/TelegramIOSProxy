@@ -44,9 +44,9 @@ def patch_chat_controller(filepath: str) -> None:
 
     match = pattern.search(content)
     if not match:
-        print("ERROR: Could not find sendMessages(_ messages: [EnqueueMessage]) in ChatController.swift")
+        print("FATAL: Could not find sendMessages(_ messages: [EnqueueMessage]) in ChatController.swift")
         print("Media caption translation will NOT work.")
-        return
+        sys.exit(1)
 
     func_header = match.group(0)
 
@@ -107,11 +107,10 @@ def patch_chat_controller(filepath: str) -> None:
                             AIBackgroundTranslationObserver.pendingCaptionOriginals["\\(aiPeerId.id._internalGetInt64Value())_\\(translatedText)"] = aiCaptionText
                             let _ = enqueueMessages(account: self.context.account, peerId: aiPeerId, messages: newMessages).start()
                         } else {
-                            // Translation failed — send original untranslated to preserve media
-                            let _ = enqueueMessages(account: self.context.account, peerId: aiPeerId, messages: aiOriginalMessages).start()
+                            // Translation failed — do NOT send untranslated. Show error.
                             self.present(UndoOverlayController(
                                 presentationData: self.presentationData,
-                                content: .info(title: nil, text: "Caption translation failed. Sent in original language.", timeout: 5.0, customUndoText: nil),
+                                content: .info(title: nil, text: "Translation failed. Message not sent. Try again.", timeout: 5.0, customUndoText: nil),
                                 elevatedLayout: true,
                                 action: { _ in return false }
                             ), in: .current)
@@ -123,10 +122,10 @@ def patch_chat_controller(filepath: str) -> None:
                         guard !aiTranslationCompleted, let self = self else { return }
                         aiTranslationCompleted = true
                         aiTranslationDisposable.dispose()
-                        let _ = enqueueMessages(account: self.context.account, peerId: aiPeerId, messages: aiOriginalMessages).start()
+                        // Do NOT send untranslated. Show error.
                         self.present(UndoOverlayController(
                             presentationData: self.presentationData,
-                            content: .info(title: nil, text: "Caption translation timed out. Sent in original language.", timeout: 5.0, customUndoText: nil),
+                            content: .info(title: nil, text: "Translation timed out. Message not sent. Try again.", timeout: 5.0, customUndoText: nil),
                             elevatedLayout: true,
                             action: { _ in return false }
                         ), in: .current)

@@ -45,9 +45,9 @@ def patch_load_display_node(filepath: str) -> None:
         old_line_pattern = r"(\s+)signal = enqueueMessages\(account: strongSelf\.context\.account, peerId: peerId, messages: transformedMessages\)"
         match = re.search(old_line_pattern, content)
         if not match:
-            print("ERROR: Could not find enqueueMessages call for transformedMessages")
+            print("FATAL: Could not find enqueueMessages call for transformedMessages")
             print("The outgoing translation hook for typed messages will NOT work.")
-            return
+            sys.exit(1)
         old_line = match.group(0)
         indent = match.group(1)
     else:

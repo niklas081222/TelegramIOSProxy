@@ -88,49 +88,102 @@ class BatchTranslateResponse(BaseModel):
 
 
 class TranslationService:
-    # Words/patterns identical in English and German — skip API call, return as-is.
-    # Greetings, interjections, loanwords, and common chat slang.
-    PASSTHROUGH_WORDS: set[str] = {
-        "hey", "hi", "hello", "hallo", "ok", "okay", "okey", "oke", "okee", "oki",
-        "okok", "hmm", "hmmm", "hm", "mhm", "mhh", "haha", "hehe", "lol",
-        "wow", "nice", "cool", "super", "fit", "standard", "premium", "basic",
-        "cam", "chat", "start", "done", "moment", "min",
-        "baby", "babe", "bro", "daddy", "honey",
-        "paypal", "paysafe", "sparkasse", "telegram", "screenshot",
-        "yes", "no", "cc", "pp",
+    # Static translation maps — skip AI, return known translation instantly.
+    # Key: lowercased word. Value: translated word (lowercase).
+    # Words mapping to themselves are identical in both languages.
+    STATIC_OUTGOING: dict[str, str] = {
+        # Actual translations EN→DE
+        "hello": "hallo", "yes": "ja", "no": "nein",
+        # Normalizations (same both directions)
+        "okey": "okay", "oke": "okay", "okee": "okay", "oki": "okay",
+        # Identical in both languages
+        "hey": "hey", "hi": "hi", "ok": "ok", "okay": "okay", "okok": "okok",
+        "hmm": "hmm", "hmmm": "hmmm", "hm": "hm", "mhm": "mhm", "mhh": "mhh",
+        "haha": "haha", "hehe": "hehe", "lol": "lol",
+        "wow": "wow", "nice": "nice", "cool": "cool", "super": "super",
+        "fit": "fit", "standard": "standard", "premium": "premium", "basic": "basic",
+        "cam": "cam", "chat": "chat", "start": "start", "done": "fertig",
+        "moment": "moment", "min": "min",
+        "baby": "baby", "babe": "babe", "bro": "bro", "daddy": "daddy", "honey": "honey",
+        "paypal": "paypal", "paysafe": "paysafe", "sparkasse": "sparkasse",
+        "telegram": "telegram", "screenshot": "screenshot",
+        "cc": "cc", "pp": "pp",
+    }
+
+    STATIC_INCOMING: dict[str, str] = {
+        # Actual translations DE→EN
+        "hallo": "hello", "ja": "yes", "nein": "no", "fertig": "done",
+        # Normalizations (same both directions)
+        "okey": "okay", "oke": "okay", "okee": "okay", "oki": "okay",
+        # Identical in both languages (same as outgoing)
+        "hey": "hey", "hi": "hi", "ok": "ok", "okay": "okay", "okok": "okok",
+        "hmm": "hmm", "hmmm": "hmmm", "hm": "hm", "mhm": "mhm", "mhh": "mhh",
+        "haha": "haha", "hehe": "hehe", "lol": "lol",
+        "wow": "wow", "nice": "nice", "cool": "cool", "super": "super",
+        "fit": "fit", "standard": "standard", "premium": "premium", "basic": "basic",
+        "cam": "cam", "chat": "chat", "start": "start", "done": "done",
+        "moment": "moment", "min": "min",
+        "baby": "baby", "babe": "babe", "bro": "bro", "daddy": "daddy", "honey": "honey",
+        "paypal": "paypal", "paysafe": "paysafe", "sparkasse": "sparkasse",
+        "telegram": "telegram", "screenshot": "screenshot",
+        "hello": "hello", "yes": "yes", "no": "no", "done": "done",
+        "cc": "cc", "pp": "pp",
     }
 
     @staticmethod
-    def _is_passthrough(text: str) -> bool:
-        """Check if text should bypass AI translation and be returned as-is."""
+    def _apply_case(source: str, target: str) -> str:
+        """Apply the case pattern of source to target."""
+        if source.isupper():
+            return target.upper()
+        if source and source[0].isupper():
+            return target[0].upper() + target[1:] if target else target
+        return target
+
+    @staticmethod
+    def _try_static_translate(text: str, direction: str) -> str | None:
+        """Try to translate using static maps. Returns translated text or None."""
         stripped = text.strip()
         if not stripped:
-            return True
+            return stripped
 
-        # Pure punctuation, numbers, symbols, emoji — no translatable content
+        # Pure punctuation, numbers, symbols, emoji — return as-is
         if re.fullmatch(r'[\W\d\s€$@#]+', stripped, re.UNICODE):
-            return True
+            return stripped
 
-        # Strip all non-letter chars, check if remaining is a known passthrough word
-        letters_only = re.sub(r'[^a-zA-Z]', '', stripped).lower()
+        # Split into: leading non-letters, single word (letters only), trailing non-letters
+        # Multi-word text won't match → returns None → goes to AI
+        match = re.fullmatch(r'([^a-zA-Z]*?)([a-zA-Z]+)([^a-zA-Z]*)', stripped)
+        if not match:
+            return None  # Multi-word or complex text — use AI
 
-        # No letters at all (emoji-only, numbers-only)
-        if not letters_only:
-            return True
+        prefix, word, suffix = match.group(1), match.group(2), match.group(3)
+        word_lower = word.lower()
 
-        # Extended greeting variants: hey, heyy, heyyy, ..., hi, hii, hiii, ...
-        if re.fullmatch(r'he(y+)', letters_only) or re.fullmatch(r'h(i+)', letters_only):
-            return True
+        word_map = (
+            TranslationService.STATIC_OUTGOING if direction == "outgoing"
+            else TranslationService.STATIC_INCOMING
+        )
 
-        # Exact match in passthrough set
-        if letters_only in TranslationService.PASSTHROUGH_WORDS:
-            return True
+        # Exact match in static map
+        if word_lower in word_map:
+            translated = TranslationService._apply_case(word, word_map[word_lower])
+            return prefix + translated + suffix
 
-        # "huhu" and similar repeated syllable greetings
-        if re.fullmatch(r'(hu){2,}', letters_only):
-            return True
+        # Regex: hey, heyy, heyyy, ... → return as-is
+        if re.fullmatch(r'he(y+)', word_lower):
+            return stripped
 
-        return False
+        # Regex: hi, hii, hiii, ... → return as-is
+        if re.fullmatch(r'h(i+)', word_lower):
+            return stripped
+
+        # Regex: huhu, huhuhu, ... → return as-is
+        if re.fullmatch(r'(hu){2,}', word_lower):
+            return stripped
+
+        return None  # Not a static translation — use AI
+
+    CACHE_PATH = Path(__file__).parent / "translation_cache.json"
 
     def __init__(self):
         limits = httpx.Limits(max_connections=100, max_keepalive_connections=20)
@@ -141,11 +194,28 @@ class TranslationService:
             "failed": 0,
             "retries": 0,
             "fallbacks": 0,
+            "cache_hits": 0,
             "total_response_time_ms": 0.0,
         }
         self.last_successful_translation: Optional[float] = None
         self._prompt_cache: dict[str, str] = {}
+        self._translation_cache: dict[str, str] = self._load_translation_cache()
         self._load_prompts()
+        logger.info(f"Translation cache loaded: {len(self._translation_cache)} entries")
+
+    def _load_translation_cache(self) -> dict[str, str]:
+        try:
+            data = json.loads(self.CACHE_PATH.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                return data
+        except (FileNotFoundError, json.JSONDecodeError, ValueError):
+            pass
+        return {}
+
+    def _save_translation_cache(self) -> None:
+        tmp = self.CACHE_PATH.with_suffix(".tmp")
+        tmp.write_text(json.dumps(self._translation_cache, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(self.CACHE_PATH)
 
     def _load_prompts(self) -> None:
         """Load all system prompts from disk into memory cache."""
@@ -216,7 +286,12 @@ class TranslationService:
         messages.append({"role": "user", "content": user_content})
         return messages
 
-    async def _call_openrouter(self, messages: list[dict]) -> str:
+    FALLBACK_MODELS = [
+        "deepseek/deepseek-v3.2",
+        "z-ai/glm-4.7",
+    ]
+
+    async def _call_openrouter(self, messages: list[dict], model: str | None = None) -> str:
         headers = {
             "Authorization": f"Bearer {OPENROUTER_API_KEY}",
             "Content-Type": "application/json",
@@ -224,12 +299,13 @@ class TranslationService:
             "X-Title": "TranslateGram",
         }
         payload = {
-            "model": OPENROUTER_MODEL,
+            "model": model or OPENROUTER_MODEL,
             "messages": messages,
             "temperature": 0.3,
             "max_tokens": 4096,
-            "reasoning": {"effort": "none"},
         }
+        if "grok" in (model or OPENROUTER_MODEL):
+            payload["reasoning"] = {"effort": "none"}
 
         response = await self.client.post(
             OPENROUTER_BASE_URL, headers=headers, json=payload
@@ -261,6 +337,11 @@ class TranslationService:
         if not choices:
             raise EmptyResponseError("No choices in response")
 
+        # Detect content_filter — don't retry same model, fall back immediately
+        finish_reason = choices[0].get("finish_reason", "")
+        if finish_reason == "content_filter":
+            raise ContentFilterError(f"Content filter triggered on {model or OPENROUTER_MODEL}")
+
         content = choices[0].get("message", {}).get("content", "").strip()
         if not content:
             raise EmptyResponseError("Empty content in response")
@@ -270,16 +351,35 @@ class TranslationService:
     async def translate(self, request: TranslateRequest) -> TranslateResponse:
         self.stats["total_requests"] += 1
 
-        # Passthrough: skip API call for text that doesn't need translation
-        if self._is_passthrough(request.text):
+        # Static translation: skip API call for known words/patterns
+        static_result = self._try_static_translate(request.text, request.direction)
+        if static_result is not None:
             self.stats["successful"] += 1
             logger.info(
                 f"chat_id={request.chat_id} dir={request.direction} "
-                f"len={len(request.text)} PASSTHROUGH "
-                f"| {request.text[:80]}"
+                f"len={len(request.text)} STATIC "
+                f"| {request.text[:80]} -> {static_result[:80]}"
             )
             return TranslateResponse(
-                translated_text=request.text,
+                translated_text=static_result,
+                original_text=request.text,
+                direction=request.direction,
+                translation_failed=False,
+            )
+
+        # Cache lookup: exact match on text + direction
+        cache_key = request.text + "\x00" + request.direction
+        cached = self._translation_cache.get(cache_key)
+        if cached is not None:
+            self.stats["cache_hits"] += 1
+            self.stats["successful"] += 1
+            logger.info(
+                f"chat_id={request.chat_id} dir={request.direction} "
+                f"len={len(request.text)} CACHE "
+                f"| {request.text[:80]} -> {cached[:80]}"
+            )
+            return TranslateResponse(
+                translated_text=cached,
                 original_text=request.text,
                 direction=request.direction,
                 translation_failed=False,
@@ -296,7 +396,12 @@ class TranslationService:
         translation_failed = False
 
         try:
-            translated_text = await self._retry_translate(messages)
+            translated_text = await self._retry_translate(
+                messages,
+                chat_id=request.chat_id,
+                direction=request.direction,
+                original_text=request.text,
+            )
         except TranslationExhaustedError:
             logger.error(
                 f"EXHAUSTED chat_id={request.chat_id} "
@@ -313,6 +418,10 @@ class TranslationService:
         if not translation_failed:
             self.stats["successful"] += 1
             self.last_successful_translation = time.time()
+            # Store in persistent cache (skip identity translations where input == output)
+            if translated_text != request.text:
+                self._translation_cache[cache_key] = translated_text
+                self._save_translation_cache()
 
         logger.info(
             f"chat_id={request.chat_id} dir={request.direction} "
@@ -321,7 +430,6 @@ class TranslationService:
             f"| {request.text[:80]} -> {translated_text[:80] if translated_text else 'NONE'}"
         )
 
-
         return TranslateResponse(
             translated_text=translated_text,
             original_text=request.text,
@@ -329,12 +437,26 @@ class TranslationService:
             translation_failed=translation_failed,
         )
 
-    async def _retry_translate(self, messages: list[dict]) -> str:
+    async def _retry_translate(self, messages: list[dict], *, chat_id: str = "", direction: str = "", original_text: str = "") -> str:
         last_exception = None
 
+        # Try primary model (with retries for non-filter errors)
         for attempt in range(3):
             try:
                 return await self._call_openrouter(messages)
+            except ContentFilterError as e:
+                # Log the FULL request that was blocked
+                full_content = "\n".join(
+                    f"  [{m['role']}]: {m['content']}" for m in messages
+                )
+                logger.warning(
+                    f"CONTENT_FILTER [{OPENROUTER_MODEL}] chat_id={chat_id} dir={direction} "
+                    f"text={original_text!r}\n"
+                    f"  Full request payload:\n{full_content}"
+                )
+                last_exception = e
+                # Don't retry same model on content_filter — go to fallback chain
+                break
             except Exception as e:
                 last_exception = e
                 self.stats["retries"] += 1
@@ -343,8 +465,30 @@ class TranslationService:
                     f"({type(e).__name__}: {e})"
                 )
 
+        # Fallback chain: try each fallback model once
+        if isinstance(last_exception, ContentFilterError):
+            for fallback_model in self.FALLBACK_MODELS:
+                logger.info(f"Trying fallback: {fallback_model}")
+                try:
+                    return await self._call_openrouter(messages, model=fallback_model)
+                except ContentFilterError:
+                    logger.warning(
+                        f"CONTENT_FILTER [{fallback_model}] chat_id={chat_id} dir={direction} "
+                        f"text={original_text!r}"
+                    )
+                    continue
+                except Exception as e:
+                    logger.warning(f"Fallback {fallback_model} failed ({type(e).__name__}: {e})")
+                    last_exception = e
+                    continue
+
+            logger.warning(
+                f"ALL_MODELS_BLOCKED chat_id={chat_id} dir={direction} "
+                f"text={original_text!r} — primary + {len(self.FALLBACK_MODELS)} fallbacks all blocked"
+            )
+
         raise TranslationExhaustedError(
-            f"All 3 attempts failed. Last error: {last_exception}"
+            f"All attempts failed. Last error: {last_exception}"
         )
 
 
@@ -356,6 +500,10 @@ class OpenRouterError(Exception):
 
 
 class EmptyResponseError(OpenRouterError):
+    pass
+
+
+class ContentFilterError(OpenRouterError):
     pass
 
 
@@ -507,6 +655,8 @@ async def stats():
         "failed": s["failed"],
         "retries": s["retries"],
         "fallbacks": s["fallbacks"],
+        "cache_hits": s["cache_hits"],
+        "cache_size": len(translation_service._translation_cache),
         "success_rate": round(s["successful"] / total, 4) if total > 0 else 0,
         "avg_response_time_ms": round(avg_ms, 1),
     }
