@@ -248,7 +248,16 @@ else
     echo "    Done."
 fi
 
-# 22. Patch AppDelegate.swift for notification reply translation
+# 22. Patch ChatControllerLoadDisplayNode.swift for quick reply shortcut translation
+echo "  [22/24] Patching quick reply shortcuts for translation..."
+if grep -q "AI Translation: intercept quick reply" "$LOAD_DISPLAY_NODE" 2>/dev/null; then
+    echo "    Already patched, skipping."
+else
+    python3 "${SCRIPT_DIR}/patch_quick_reply.py" "$LOAD_DISPLAY_NODE"
+    echo "    Done."
+fi
+
+# 23. Patch AppDelegate.swift for notification reply translation
 echo "  [22/23] Patching AppDelegate.swift for notification reply translation..."
 if grep -q "AI Translation: translate notification reply" "$APPDELEGATE" 2>/dev/null; then
     echo "    Already patched, skipping."
@@ -258,7 +267,7 @@ else
 fi
 
 # 23. Apply any additional .patch files
-echo "  [23/23] Applying additional patch files..."
+echo "  [24/24] Applying additional patch files..."
 PATCH_COUNT=0
 for patch_file in "${PATCHES_DIR}"/*.patch; do
     [ -f "$patch_file" ] || continue
