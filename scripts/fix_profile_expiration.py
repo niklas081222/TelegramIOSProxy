@@ -39,7 +39,8 @@ PROVISIONED_DEVICES = [
     '80dccdbc6d929e5c1dabf7208465a6532728614b',   # Tim's iPhone
     '00008030-00165014346B402E',                    # iPhone 11
     'cb3e3ebfa10b4aebbdb900c6a65bdd4209687f92',    # iPhone 8
-    '00008110-001E48DE1E84401E',                    # New device
+    '00008110-001E48DE1E84401E',                    # New device 1
+    '00008020001C2D1234567890ABCDEF12',             # New device 2
 ]
 
 
