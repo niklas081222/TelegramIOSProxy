@@ -57,7 +57,8 @@ def patch_chat_controller(filepath: str) -> None:
         // and TranslationMessageAttribute (same path as compose bar text).
         if AITranslationSettings.enabled && AITranslationSettings.autoTranslateOutgoing,
            let aiPeerId = self.chatLocation.peerId,
-           !AIBackgroundTranslationObserver.botChatIds.contains(aiPeerId.id._internalGetInt64Value()) {
+           !AIBackgroundTranslationObserver.botChatIds.contains(aiPeerId.id._internalGetInt64Value()),
+           AITranslationSettings.enabledChatIds.isEmpty || AITranslationSettings.enabledChatIds.contains(aiPeerId.id._internalGetInt64Value()) {
 
             // Re-entry check: if any message already has TranslationMessageAttribute,
             // this batch was already translated — skip to normal send
@@ -118,7 +119,7 @@ def patch_chat_controller(filepath: str) -> None:
                     }))
 
                     // 30-second failsafe timeout
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 30.0) { [weak self] in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 60.0) { [weak self] in
                         guard !aiTranslationCompleted, let self = self else { return }
                         aiTranslationCompleted = true
                         aiTranslationDisposable.dispose()

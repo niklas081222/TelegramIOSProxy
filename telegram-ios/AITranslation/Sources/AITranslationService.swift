@@ -75,7 +75,7 @@ public final class AITranslationService {
         context: AccountContext
     ) -> Signal<String?, NoError> {
         guard shouldTranslateOutgoing(chatId: chatId) else {
-            return .single(nil)
+            return .single(text)
         }
         if proxyClient == nil {
             updateProxyClient()

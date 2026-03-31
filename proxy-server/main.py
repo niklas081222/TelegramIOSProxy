@@ -342,7 +342,7 @@ class TranslationService:
         if finish_reason == "content_filter":
             raise ContentFilterError(f"Content filter triggered on {model or OPENROUTER_MODEL}")
 
-        content = choices[0].get("message", {}).get("content", "").strip()
+        content = (choices[0].get("message", {}).get("content") or "").strip()
         if not content:
             raise EmptyResponseError("Empty content in response")
 
@@ -438,57 +438,52 @@ class TranslationService:
         )
 
     async def _retry_translate(self, messages: list[dict], *, chat_id: str = "", direction: str = "", original_text: str = "") -> str:
-        last_exception = None
+        """Try primary model once, then each fallback model once.
 
-        # Try primary model (with retries for non-filter errors)
-        for attempt in range(3):
+        Universal fallback: ALL error types (not just ContentFilter) trigger
+        the next model. PaymentError breaks immediately (no point retrying).
+        """
+        models = [OPENROUTER_MODEL] + self.FALLBACK_MODELS
+        last_exception = None
+        content_filter_count = 0
+
+        for model in models:
             try:
-                return await self._call_openrouter(messages)
+                result = await self._call_openrouter(messages, model=model)
+                if model != OPENROUTER_MODEL:
+                    self.stats["fallbacks"] += 1
+                return result
+            except PaymentError as e:
+                logger.error(f"PAYMENT chat_id={chat_id} dir={direction}: {e}")
+                raise TranslationExhaustedError(f"Payment required: {e}")
             except ContentFilterError as e:
-                # Log the FULL request that was blocked
+                content_filter_count += 1
                 full_content = "\n".join(
                     f"  [{m['role']}]: {m['content']}" for m in messages
                 )
                 logger.warning(
-                    f"CONTENT_FILTER [{OPENROUTER_MODEL}] chat_id={chat_id} dir={direction} "
+                    f"CONTENT_FILTER [{model}] chat_id={chat_id} dir={direction} "
                     f"text={original_text!r}\n"
                     f"  Full request payload:\n{full_content}"
                 )
                 last_exception = e
-                # Don't retry same model on content_filter — go to fallback chain
-                break
+                continue
             except Exception as e:
-                last_exception = e
                 self.stats["retries"] += 1
                 logger.warning(
-                    f"Attempt {attempt + 1}/3 failed "
-                    f"({type(e).__name__}: {e})"
+                    f"Model {model} failed ({type(e).__name__}: {e})"
                 )
+                last_exception = e
+                continue
 
-        # Fallback chain: try each fallback model once
-        if isinstance(last_exception, ContentFilterError):
-            for fallback_model in self.FALLBACK_MODELS:
-                logger.info(f"Trying fallback: {fallback_model}")
-                try:
-                    return await self._call_openrouter(messages, model=fallback_model)
-                except ContentFilterError:
-                    logger.warning(
-                        f"CONTENT_FILTER [{fallback_model}] chat_id={chat_id} dir={direction} "
-                        f"text={original_text!r}"
-                    )
-                    continue
-                except Exception as e:
-                    logger.warning(f"Fallback {fallback_model} failed ({type(e).__name__}: {e})")
-                    last_exception = e
-                    continue
-
+        if content_filter_count == len(models):
             logger.warning(
                 f"ALL_MODELS_BLOCKED chat_id={chat_id} dir={direction} "
-                f"text={original_text!r} — primary + {len(self.FALLBACK_MODELS)} fallbacks all blocked"
+                f"text={original_text!r} — all {len(models)} models blocked"
             )
 
         raise TranslationExhaustedError(
-            f"All attempts failed. Last error: {last_exception}"
+            f"All models failed. Last error: {last_exception}"
         )
 
 
@@ -665,7 +660,7 @@ async def stats():
 # --- OTA Install ---
 
 OTA_DIR = Path(__file__).parent / "ota"
-OTA_BUNDLE_ID = "com.niklas.translategram"
+OTA_BUNDLE_ID = "com.niklas.translategram2"
 OTA_APP_TITLE = "TranslateGram"
 OTA_BUNDLE_VERSION = "11.13"
 

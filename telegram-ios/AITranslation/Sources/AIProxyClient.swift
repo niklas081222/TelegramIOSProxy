@@ -123,6 +123,7 @@ public enum StrictTranslationResult {
 
 public final class AIProxyClient {
     private let session: URLSession
+    private let outgoingSession: URLSession
     private let batchSession: URLSession
     private let baseURL: String
 
@@ -130,10 +131,17 @@ public final class AIProxyClient {
         let trimmed = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         self.baseURL = trimmed.hasSuffix("/") ? String(trimmed.dropLast()) : trimmed
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 20
-        config.timeoutIntervalForResource = 25
+        config.timeoutIntervalForRequest = 45
+        config.timeoutIntervalForResource = 50
         config.httpMaximumConnectionsPerHost = 20
         self.session = URLSession(configuration: config)
+
+        // Dedicated session for outgoing translations — isolated from incoming load
+        let outgoingConfig = URLSessionConfiguration.default
+        outgoingConfig.timeoutIntervalForRequest = 45
+        outgoingConfig.timeoutIntervalForResource = 50
+        outgoingConfig.httpMaximumConnectionsPerHost = 5
+        self.outgoingSession = URLSession(configuration: outgoingConfig)
 
         // Batch requests process many items server-side, need longer timeout
         let batchConfig = URLSessionConfiguration.default
@@ -248,7 +256,7 @@ public final class AIProxyClient {
                 return EmptyDisposable
             }
 
-            let task = self.session.dataTask(with: urlRequest) { data, response, error in
+            let task = self.outgoingSession.dataTask(with: urlRequest) { data, response, error in
                 if let error = error {
                     subscriber.putNext(nil)
                     subscriber.putCompletion()
@@ -317,7 +325,7 @@ public final class AIProxyClient {
                 return EmptyDisposable
             }
 
-            let task = self.session.dataTask(with: urlRequest) { data, response, error in
+            let task = self.outgoingSession.dataTask(with: urlRequest) { data, response, error in
                 if let error = error {
                     subscriber.putNext(.iosError)
                     subscriber.putCompletion()

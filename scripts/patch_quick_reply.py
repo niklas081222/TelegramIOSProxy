@@ -34,7 +34,7 @@ def patch_quick_reply(filepath: str) -> None:
             |> deliverOnMainQueue).start(next: { [weak self] view, _, _ in
                 guard let self = self else { return }
 
-                if !AITranslationSettings.enabled || !AITranslationSettings.autoTranslateOutgoing || AIBackgroundTranslationObserver.botChatIds.contains(peerId.id._internalGetInt64Value()) {
+                if !AITranslationSettings.enabled || !AITranslationSettings.autoTranslateOutgoing || AIBackgroundTranslationObserver.botChatIds.contains(peerId.id._internalGetInt64Value()) || (!AITranslationSettings.enabledChatIds.isEmpty && !AITranslationSettings.enabledChatIds.contains(peerId.id._internalGetInt64Value())) {
                     self.context.engine.accountData.sendMessageShortcut(peerId: peerId, id: shortcutId)
                     return
                 }

@@ -110,7 +110,7 @@ public final class AIOutgoingMessageQueue {
 
         // 30-second failsafe: if translation doesn't complete, auto-fail.
         // Triggers error popup + text restore. No message may silently vanish.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 30.0) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 60.0) { [weak self] in
             guard let self = self else { return }
             guard let queue = self.peerQueues[peerId],
                   let entry = queue.first(where: { $0.id == entryId }),

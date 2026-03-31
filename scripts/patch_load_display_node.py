@@ -58,7 +58,7 @@ def patch_load_display_node(filepath: str) -> None:
 {indent}// Forwards and non-translatable messages use the original send path to avoid duplication.
 {indent}let aiNeedsTranslation = transformedMessages.contains(where: {{
 {indent}    if case let .message(text, _, _, _, _, _, _, _, _, _) = $0 {{
-{indent}        return !text.isEmpty && AITranslationSettings.enabled && AITranslationSettings.autoTranslateOutgoing && !AIBackgroundTranslationObserver.botChatIds.contains(peerId.id._internalGetInt64Value())
+{indent}        return !text.isEmpty && AITranslationSettings.enabled && AITranslationSettings.autoTranslateOutgoing && !AIBackgroundTranslationObserver.botChatIds.contains(peerId.id._internalGetInt64Value()) && (AITranslationSettings.enabledChatIds.isEmpty || AITranslationSettings.enabledChatIds.contains(peerId.id._internalGetInt64Value()))
 {indent}    }}
 {indent}    return false
 {indent}}})
@@ -69,7 +69,7 @@ def patch_load_display_node(filepath: str) -> None:
 {indent}    for aiMsg in transformedMessages {{
 {indent}        switch aiMsg {{
 {indent}        case let .message(text, attributes, inlineStickers, mediaReference, threadId, replyToMessageId, replyToStoryId, localGroupingKey, correlationId, bubbleUpEmojiOrStickersets):
-{indent}            if !text.isEmpty && AITranslationSettings.enabled && AITranslationSettings.autoTranslateOutgoing && !AIBackgroundTranslationObserver.botChatIds.contains(peerId.id._internalGetInt64Value()) {{
+{indent}            if !text.isEmpty && AITranslationSettings.enabled && AITranslationSettings.autoTranslateOutgoing && !AIBackgroundTranslationObserver.botChatIds.contains(peerId.id._internalGetInt64Value()) && (AITranslationSettings.enabledChatIds.isEmpty || AITranslationSettings.enabledChatIds.contains(peerId.id._internalGetInt64Value())) {{
 {indent}                AIOutgoingMessageQueue.shared.enqueue(
 {indent}                    text: text,
 {indent}                    peerId: peerId,

@@ -45,7 +45,7 @@ def patch_notification_reply(filepath: str) -> None:
     new_code = """// AI Translation: translate notification reply before sending
                         let aiReplyToMessageId = replyToMessageId
                         let aiProxyURL = AITranslationSettings.proxyServerURL
-                        if AITranslationSettings.enabled && AITranslationSettings.autoTranslateOutgoing && !aiProxyURL.isEmpty && !AIBackgroundTranslationObserver.botChatIds.contains(peerId.id._internalGetInt64Value()) {
+                        if AITranslationSettings.enabled && AITranslationSettings.autoTranslateOutgoing && !aiProxyURL.isEmpty && !AIBackgroundTranslationObserver.botChatIds.contains(peerId.id._internalGetInt64Value()) && (AITranslationSettings.enabledChatIds.isEmpty || AITranslationSettings.enabledChatIds.contains(peerId.id._internalGetInt64Value())) {
                             let aiClient = AIProxyClient(baseURL: aiProxyURL)
                             return aiClient.translateStrict(
                                 text: text,
