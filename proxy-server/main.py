@@ -660,7 +660,7 @@ async def stats():
 # --- OTA Install ---
 
 OTA_DIR = Path(__file__).parent / "ota"
-OTA_BUNDLE_ID = "com.niklas.translategram2"
+OTA_BUNDLE_ID = "com.niklas.translategram"
 OTA_APP_TITLE = "TranslateGram"
 OTA_BUNDLE_VERSION = "11.13"
 
@@ -680,20 +680,10 @@ async def ota_ipa():
     ipa_path = OTA_DIR / "app.ipa"
     if not ipa_path.exists():
         raise HTTPException(status_code=404, detail="IPA not found")
-    file_size = ipa_path.stat().st_size
-
-    def iter_file():
-        with open(ipa_path, "rb") as f:
-            while chunk := f.read(1024 * 1024):  # 1MB chunks
-                yield chunk
-
-    return StreamingResponse(
-        iter_file(),
+    return FileResponse(
+        path=ipa_path,
         media_type="application/octet-stream",
-        headers={
-            "Content-Length": str(file_size),
-            "Content-Disposition": "attachment; filename=TranslateGram.ipa",
-        },
+        filename="TranslateGram.ipa",
     )
 
 

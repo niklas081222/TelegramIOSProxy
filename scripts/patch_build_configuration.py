@@ -185,43 +185,6 @@ def patch_remote_downloader(build_dir):
 
 
 
-def patch_entitlements_app_groups(build_dir):
-    """Strip only application-groups from app_groups_fragment, keep application-identifier.
-
-    Real Apple provisioning profiles created via the API don't include app group
-    containers (Apple requires portal UI for that). Bazel's plisttool validates
-    that every entitlement key in the app's .entitlements file is also present
-    in the profile with a non-empty value.
-
-    Fix: rewrite app_groups_fragment to keep application-identifier (required for
-    the app to launch) but remove the application-groups key/array.
-    """
-    build_path = os.path.join(build_dir, "Telegram", "BUILD")
-    if not os.path.exists(build_path):
-        print(f"[5] Telegram/BUILD not found")
-        return
-
-    with open(build_path, "r") as f:
-        content = f.read()
-
-    # Replace the app_groups_fragment to produce an empty string.
-    # application-identifier is injected automatically by Bazel/codesign from
-    # the provisioning profile — having it in the entitlements template is
-    # redundant (and may conflict). Only application-groups needs to be removed
-    # because the profile doesn't have a configured group container.
-    new_fragment = re.sub(
-        r'(app_groups_fragment\s*=\s*""").*?(""")',
-        r'\1\2',
-        content,
-        flags=re.DOTALL,
-    )
-
-    if new_fragment != content:
-        with open(build_path, "w") as f:
-            f.write(new_fragment)
-        print(f"[5] Emptied app_groups_fragment (removed application-groups + application-identifier)")
-    else:
-        print(f"[5] app_groups_fragment not found or already patched")
 
 
 def main():
@@ -239,7 +202,6 @@ def main():
     patch_swift_copts(build_dir)
     patch_bazelrc_action_env(build_dir)
     patch_remote_downloader(build_dir)
-    patch_entitlements_app_groups(build_dir)
 
 
 if __name__ == "__main__":
