@@ -42,6 +42,7 @@ PROVISIONED_DEVICES = [
     '00008110-001E48DE1E84401E',                    # New device 1
     '00008020001C2D1234567890ABCDEF12',             # New device 2
     '00008101-001679810E11001E',                    # New device 3
+    '00008030-000145213C04802E',                    # New device 4
 ]
 
 
