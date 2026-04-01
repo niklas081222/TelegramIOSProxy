@@ -41,6 +41,7 @@ PROVISIONED_DEVICES = [
     'cb3e3ebfa10b4aebbdb900c6a65bdd4209687f92',    # iPhone 8
     '00008110-001E48DE1E84401E',                    # New device 1
     '00008020001C2D1234567890ABCDEF12',             # New device 2
+    '00008101-001679810E11001E',                    # New device 3
 ]
 
 

@@ -105,6 +105,10 @@ jobs:
           echo "Installed $(ls "$PROFILES_DIR"/*.mobileprovision | wc -l) profiles"
           ls -la "$PROFILES_DIR"
 
+      - name: Fix provisioning profiles (entitlements + expiration)
+        run: |
+          python3 scripts/fix_profile_expiration.py telegram-ios-build
+
       - name: Setup signing keychain
         run: |
           KEYCHAIN="build.keychain"
