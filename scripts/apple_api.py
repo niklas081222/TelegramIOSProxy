@@ -282,7 +282,7 @@ def save_profiles_and_cert(profiles, p12_path):
     print("\n=== SAVING TO GITHUB SECRETS ===")
     # Encode profiles as base64 for GitHub secrets
     repo = "niklas03122/TelegramIOSProxy"
-    gh_token = "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"
+    gh_token = os.environ.get("GH_TOKEN", "")
 
     # Upload certificate
     with open(p12_path, "rb") as f:
