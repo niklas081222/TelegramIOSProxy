@@ -185,6 +185,63 @@ def patch_remote_downloader(build_dir):
 
 
 
+def patch_entitlements_app_groups(build_dir):
+    """Remove com.apple.security.application-groups from Telegram.entitlements.
+
+    Real Apple provisioning profiles created via the API don't include app group
+    containers (Apple requires portal UI for that). Bazel's plisttool validates
+    that every entitlement key in the app's .entitlements file is also present
+    in the profile with a non-empty value. Since the profile has an empty array,
+    plisttool rejects it.
+
+    Fix: remove the key from the entitlements plist so plisttool skips the check.
+    The app still works — app groups are only needed for shared containers between
+    app and extensions, which we don't use.
+    """
+    import glob
+    import plistlib
+
+    # Find all .entitlements files
+    pattern = os.path.join(build_dir, "**", "*.entitlements")
+    entitlement_files = glob.glob(pattern, recursive=True)
+
+    # Also check Telegram/BUILD for entitlements references
+    build_path = os.path.join(build_dir, "Telegram", "BUILD")
+    if os.path.exists(build_path):
+        with open(build_path, "r") as f:
+            build_content = f.read()
+
+        # Remove application-groups from any inline entitlements dict in BUILD
+        if "com.apple.security.application-groups" in build_content:
+            build_content = re.sub(
+                r'\s*"com\.apple\.security\.application-groups":\s*\[.*?\],?\n',
+                "\n",
+                build_content,
+                flags=re.DOTALL,
+            )
+            with open(build_path, "w") as f:
+                f.write(build_content)
+            print(f"[5] Removed application-groups from {build_path}")
+
+    count = 0
+    for ent_file in entitlement_files:
+        try:
+            with open(ent_file, "rb") as f:
+                plist = plistlib.load(f)
+        except Exception:
+            continue
+
+        if "com.apple.security.application-groups" in plist:
+            del plist["com.apple.security.application-groups"]
+            with open(ent_file, "wb") as f:
+                plistlib.dump(plist, f)
+            count += 1
+            print(f"[5] Removed application-groups from {ent_file}")
+
+    if count == 0 and "com.apple.security.application-groups" not in (build_content if os.path.exists(build_path) else ""):
+        print(f"[5] No application-groups entitlements found to remove")
+
+
 def main():
     if len(sys.argv) < 2:
         print("Usage: patch_build_configuration.py <telegram-ios-build-dir>")
@@ -200,6 +257,7 @@ def main():
     patch_swift_copts(build_dir)
     patch_bazelrc_action_env(build_dir)
     patch_remote_downloader(build_dir)
+    patch_entitlements_app_groups(build_dir)
 
 
 if __name__ == "__main__":
