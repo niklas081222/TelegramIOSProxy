@@ -77,10 +77,11 @@ def create_missing_profiles(profiles_dir, telegram_build_path):
 
 def extract_cert_der(p12_path):
     """Extract the DER-encoded certificate from a .p12 file."""
+    p12_password = os.environ.get("P12_PASSWORD", "")
     # Extract PEM cert from p12
     pem = subprocess.check_output([
         "openssl", "pkcs12", "-in", p12_path,
-        "-clcerts", "-nokeys", "-passin", "pass:"
+        "-clcerts", "-nokeys", "-passin", f"pass:{p12_password}"
     ])
     # Convert PEM to DER
     proc = subprocess.run(
@@ -108,9 +109,10 @@ def setup_keychain(p12_path):
         "security", "unlock-keychain", "-p", keychain_password, keychain_name
     ])
 
+    p12_password = os.environ.get("P12_PASSWORD", "")
     subprocess.check_call([
         "security", "import", p12_path,
-        "-k", keychain_name, "-P", "",
+        "-k", keychain_name, "-P", p12_password,
         "-T", "/usr/bin/codesign", "-T", "/usr/bin/security"
     ])
 
