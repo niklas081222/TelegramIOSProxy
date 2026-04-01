@@ -186,7 +186,7 @@ def patch_remote_downloader(build_dir):
 
 
 def patch_entitlements_app_groups(build_dir):
-    """Remove com.apple.security.application-groups from Telegram.entitlements.
+    """Remove com.apple.security.application-groups from Telegram entitlements.
 
     Real Apple provisioning profiles created via the API don't include app group
     containers (Apple requires portal UI for that). Bazel's plisttool validates
@@ -194,52 +194,45 @@ def patch_entitlements_app_groups(build_dir):
     in the profile with a non-empty value. Since the profile has an empty array,
     plisttool rejects it.
 
-    Fix: remove the key from the entitlements plist so plisttool skips the check.
-    The app still works — app groups are only needed for shared containers between
-    app and extensions, which we don't use.
+    Fix: remove app_groups_fragment from the TelegramEntitlements template
+    concatenation in Telegram/BUILD. This prevents the entitlement from being
+    generated in the first place.
     """
-    import glob
-    import plistlib
-
-    # Find all .entitlements files
-    pattern = os.path.join(build_dir, "**", "*.entitlements")
-    entitlement_files = glob.glob(pattern, recursive=True)
-
-    # Also check Telegram/BUILD for entitlements references
     build_path = os.path.join(build_dir, "Telegram", "BUILD")
-    if os.path.exists(build_path):
-        with open(build_path, "r") as f:
-            build_content = f.read()
+    if not os.path.exists(build_path):
+        print(f"[5] Telegram/BUILD not found")
+        return
 
-        # Remove application-groups from any inline entitlements dict in BUILD
-        if "com.apple.security.application-groups" in build_content:
-            build_content = re.sub(
-                r'\s*"com\.apple\.security\.application-groups":\s*\[.*?\],?\n',
-                "\n",
-                build_content,
-                flags=re.DOTALL,
-            )
-            with open(build_path, "w") as f:
-                f.write(build_content)
-            print(f"[5] Removed application-groups from {build_path}")
+    with open(build_path, "r") as f:
+        content = f.read()
 
-    count = 0
-    for ent_file in entitlement_files:
-        try:
-            with open(ent_file, "rb") as f:
-                plist = plistlib.load(f)
-        except Exception:
-            continue
+    changed = False
 
-        if "com.apple.security.application-groups" in plist:
-            del plist["com.apple.security.application-groups"]
-            with open(ent_file, "wb") as f:
-                plistlib.dump(plist, f)
-            count += 1
-            print(f"[5] Removed application-groups from {ent_file}")
+    # Remove app_groups_fragment from the TelegramEntitlements template list
+    # It appears as: app_groups_fragment,
+    if "app_groups_fragment," in content:
+        content = content.replace("app_groups_fragment,\n", "")
+        content = content.replace("app_groups_fragment,", "")
+        changed = True
+        print(f"[5] Removed app_groups_fragment from TelegramEntitlements")
 
-    if count == 0 and "com.apple.security.application-groups" not in (build_content if os.path.exists(build_path) else ""):
-        print(f"[5] No application-groups entitlements found to remove")
+    # Also remove the app_groups_fragment variable definition entirely
+    # It's a multi-line string assignment like:
+    #   app_groups_fragment = """...""".format(...)
+    content = re.sub(
+        r'app_groups_fragment\s*=\s*""".*?"""\.format\([^)]*\)\n',
+        "",
+        content,
+        flags=re.DOTALL,
+    )
+    if changed or "app_groups_fragment" not in content:
+        print(f"[5] Cleaned up app_groups_fragment definition")
+
+    with open(build_path, "w") as f:
+        f.write(content)
+
+    if not changed:
+        print(f"[5] app_groups_fragment not found in BUILD (may already be removed)")
 
 
 def main():
